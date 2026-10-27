@@ -1,0 +1,534 @@
+{
+  "entities": {
+    "Company": {
+      "title": "Company",
+      "description": "Empresa cliente atendida pelo sistema de gestão de chamados vinculada a um repositório GitHub.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Razão social ou nome fantasia da empresa",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "code": {
+          "type": "string",
+          "description": "Código identificador curto da empresa (ex: XPTO)",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "githubRepo": {
+          "type": "string",
+          "description": "Repositório GitHub vinculado no formato owner/repo",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "slaHours": {
+          "type": "number",
+          "description": "Prazo máximo de SLA em horas"
+        },
+        "hourlyRate": {
+          "type": "number",
+          "description": "Valor da hora técnica contratada em BRL"
+        },
+        "contractHours": {
+          "type": "number",
+          "description": "Franquia mensal de horas contratadas"
+        },
+        "status": {
+          "type": "string",
+          "description": "Status contratual da empresa",
+          "enum": ["active", "paused", "archived"]
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID do usuário proprietário do workspace",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp de criação no servidor"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp de última atualização no servidor"
+        }
+      },
+      "required": [
+        "name",
+        "code",
+        "githubRepo",
+        "slaHours",
+        "hourlyRate",
+        "contractHours",
+        "status",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TeamMember": {
+      "title": "TeamMember",
+      "description": "Integrante da equipe técnica responsável pelo atendimento de chamados e issues do GitHub.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Nome do especialista (ex: Felipe)",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "roleTitle": {
+          "type": "string",
+          "description": "Cargo técnico ou função na equipe",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "githubHandle": {
+          "type": "string",
+          "description": "Username no GitHub (Assignee)",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "specialty": {
+          "type": "string",
+          "description": "Especialidade técnica principal",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "hourlyCost": {
+          "type": "number",
+          "description": "Taxa horária interna em BRL"
+        },
+        "status": {
+          "type": "string",
+          "description": "Disponibilidade operacional do membro da equipe",
+          "enum": ["disponivel", "em_atendimento", "ausente"]
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID do usuário proprietário do workspace",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp de criação no servidor"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp de atualização no servidor"
+        }
+      },
+      "required": [
+        "name",
+        "roleTitle",
+        "githubHandle",
+        "specialty",
+        "hourlyCost",
+        "status",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Ticket": {
+      "title": "Ticket",
+      "description": "Chamado técnico sincronizado via API/Webhook com GitHub Issues, contendo cronômetro e estado de sessão.",
+      "type": "object",
+      "properties": {
+        "issueNumber": {
+          "type": "number",
+          "description": "Número da Issue no GitHub (ex: 1234)"
+        },
+        "title": {
+          "type": "string",
+          "description": "Título do chamado / Issue",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "description": {
+          "type": "string",
+          "description": "Descrição detalhada do chamado ou corpo da Issue",
+          "minLength": 0,
+          "maxLength": 4000
+        },
+        "companyId": {
+          "type": "string",
+          "description": "ID do documento da empresa vinculada",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "companyName": {
+          "type": "string",
+          "description": "Nome/Código da empresa (ex: XPTO)",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "assigneeName": {
+          "type": "string",
+          "description": "Nome do responsável pelo atendimento (ex: Felipe)",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "githubAssignee": {
+          "type": "string",
+          "description": "Login do assignee no GitHub",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "githubRepo": {
+          "type": "string",
+          "description": "Repositório GitHub de origem (owner/repo)",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "githubIssueUrl": {
+          "type": "string",
+          "description": "URL oficial da Issue no GitHub",
+          "minLength": 0,
+          "maxLength": 400
+        },
+        "githubState": {
+          "type": "string",
+          "description": "Status da Issue no GitHub",
+          "enum": ["open", "closed"]
+        },
+        "status": {
+          "type": "string",
+          "description": "Status operacional do chamado no sistema",
+          "enum": ["aberto", "em_atendimento", "pausado", "encerrado"]
+        },
+        "priority": {
+          "type": "string",
+          "description": "Prioridade de SLA do chamado",
+          "enum": ["baixa", "media", "alta", "critica"]
+        },
+        "labelsSummary": {
+          "type": "string",
+          "description": "Labels do GitHub separadas por vírgula",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "commentsCount": {
+          "type": "number",
+          "description": "Quantidade de comentários sincronizados do GitHub"
+        },
+        "lastCommentSummary": {
+          "type": "string",
+          "description": "Resumo do último comentário ou nota técnica",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "totalSecondsWorked": {
+          "type": "number",
+          "description": "Total acumulado de segundos trabalhados no chamado"
+        },
+        "activeSessionStartedAtMs": {
+          "type": "number",
+          "description": "Timestamp em milissegundos do início do turno ativo (0 se pausado ou encerrado)"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID do usuário proprietário do workspace",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp de criação no servidor"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp de última atualização no servidor"
+        }
+      },
+      "required": [
+        "issueNumber",
+        "title",
+        "description",
+        "companyId",
+        "companyName",
+        "assigneeName",
+        "githubAssignee",
+        "githubRepo",
+        "githubIssueUrl",
+        "githubState",
+        "status",
+        "priority",
+        "labelsSummary",
+        "commentsCount",
+        "lastCommentSummary",
+        "totalSecondsWorked",
+        "activeSessionStartedAtMs",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AttendanceSession": {
+      "title": "AttendanceSession",
+      "description": "Registro de sessão de atendimento e apontamento de horas trabalhadas em um chamado.",
+      "type": "object",
+      "properties": {
+        "ticketId": {
+          "type": "string",
+          "description": "ID do chamado atendido",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "issueNumber": {
+          "type": "number",
+          "description": "Número do chamado (#1234)"
+        },
+        "ticketTitle": {
+          "type": "string",
+          "description": "Título do chamado",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "companyName": {
+          "type": "string",
+          "description": "Empresa associada ao chamado",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "agentName": {
+          "type": "string",
+          "description": "Responsável que executou a sessão",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "startedAtIso": {
+          "type": "string",
+          "description": "Data/hora ISO do início da sessão",
+          "minLength": 10,
+          "maxLength": 64
+        },
+        "endedAtIso": {
+          "type": "string",
+          "description": "Data/hora ISO do término ou pausa da sessão",
+          "minLength": 0,
+          "maxLength": 64
+        },
+        "durationSeconds": {
+          "type": "number",
+          "description": "Duração contabilizada da sessão em segundos"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Resumo das atividades executadas na sessão",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "sessionStatus": {
+          "type": "string",
+          "description": "Estado da sessão de atendimento",
+          "enum": ["em_andamento", "pausada", "finalizada"]
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID do usuário proprietário do workspace",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp de criação no servidor"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp de última atualização no servidor"
+        }
+      },
+      "required": [
+        "ticketId",
+        "issueNumber",
+        "ticketTitle",
+        "companyName",
+        "agentName",
+        "startedAtIso",
+        "endedAtIso",
+        "durationSeconds",
+        "notes",
+        "sessionStatus",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Registro imutável de auditoria operacional e eventos de integração API/Webhook do GitHub.",
+      "type": "object",
+      "properties": {
+        "eventType": {
+          "type": "string",
+          "description": "Categoria do evento auditado",
+          "enum": [
+            "webhook_github",
+            "sync_api",
+            "sessao_iniciada",
+            "sessao_pausada",
+            "chamado_encerrado",
+            "chamado_criado",
+            "empresa_cadastrada",
+            "relatorio_gerado"
+          ]
+        },
+        "actorName": {
+          "type": "string",
+          "description": "Usuário ou serviço que disparou a ação",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "targetLabel": {
+          "type": "string",
+          "description": "Identificador legível do recurso afetado",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "details": {
+          "type": "string",
+          "description": "Descrição detalhada da operação registrada",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "origin": {
+          "type": "string",
+          "description": "Canal de origem do evento",
+          "enum": ["GitHub Webhook", "GitHub REST API", "Operador Web", "Sistema"]
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID do usuário proprietário do workspace",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp de criação no servidor"
+        }
+      },
+      "required": [
+        "eventType",
+        "actorName",
+        "targetLabel",
+        "details",
+        "origin",
+        "ownerId",
+        "createdAt"
+      ]
+    },
+    "ReportRecord": {
+      "title": "ReportRecord",
+      "description": "Relatório consolidado de horas trabalhadas, custos e SLA por empresa e período.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Título descritivo do relatório consolidado",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "companyFilter": {
+          "type": "string",
+          "description": "Filtro de empresa aplicado ao relatório",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "periodLabel": {
+          "type": "string",
+          "description": "Período de apuração do relatório",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "totalTickets": {
+          "type": "number",
+          "description": "Total de chamados computados no período"
+        },
+        "totalSeconds": {
+          "type": "number",
+          "description": "Total de segundos trabalhados no período"
+        },
+        "totalBilledAmount": {
+          "type": "number",
+          "description": "Valor financeiro apurado em BRL"
+        },
+        "generatedBy": {
+          "type": "string",
+          "description": "Nome do responsável pela emissão do relatório",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID do usuário proprietário do workspace",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp de emissão no servidor"
+        }
+      },
+      "required": [
+        "title",
+        "companyFilter",
+        "periodLabel",
+        "totalTickets",
+        "totalSeconds",
+        "totalBilledAmount",
+        "generatedBy",
+        "ownerId",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/companies/{companyId}": {
+      "schema": { "$ref": "#/entities/Company" },
+      "description": "Empresas clientes e seus contratos de horas e repositórios GitHub"
+    },
+    "/teamMembers/{memberId}": {
+      "schema": { "$ref": "#/entities/TeamMember" },
+      "description": "Membros da equipe técnica e especialistas de suporte"
+    },
+    "/tickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/Ticket" },
+      "description": "Chamados sincronizados com GitHub Issues e estado de cronômetro"
+    },
+    "/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/AttendanceSession" },
+      "description": "Sessões de atendimento cronometradas e horas trabalhadas por chamado"
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Logs de auditoria de webhooks, sincronizações e ações operacionais"
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/ReportRecord" },
+      "description": "Relatórios gerenciais emitidos e salvos no banco de dados"
+    }
+  }
+}

@@ -1,0 +1,208 @@
+/**
+ * Firestore Security Rules Verification Specification (Dirty Dozen Test Suite)
+ */
+
+export interface DirtyPayloadTestCase {
+  id: number;
+  name: string;
+  collection: string;
+  docId: string;
+  operation: 'create' | 'update' | 'get' | 'list' | 'delete';
+  auth: { uid: string; email_verified: boolean } | null;
+  payload?: Record<string, unknown>;
+  expectedResult: 'PERMISSION_DENIED';
+}
+
+export const DIRTY_DOZEN_TESTS: DirtyPayloadTestCase[] = [
+  {
+    id: 1,
+    name: 'Unverified Email Spoof on Company create',
+    collection: 'companies',
+    docId: 'comp_xpto',
+    operation: 'create',
+    auth: { uid: 'user_1', email_verified: false },
+    payload: {
+      name: 'XPTO Tecnologia',
+      code: 'XPTO',
+      githubRepo: 'xpto/platform',
+      slaHours: 4,
+      hourlyRate: 250,
+      contractHours: 40,
+      status: 'active',
+      ownerId: 'user_1',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 2,
+    name: 'Cross-Tenant Ownership Spoof on Company create',
+    collection: 'companies',
+    docId: 'comp_xpto',
+    operation: 'create',
+    auth: { uid: 'user_1', email_verified: true },
+    payload: {
+      name: 'XPTO Tecnologia',
+      code: 'XPTO',
+      githubRepo: 'xpto/platform',
+      slaHours: 4,
+      hourlyRate: 250,
+      contractHours: 40,
+      status: 'active',
+      ownerId: 'user_2',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 3,
+    name: 'Shadow Field Injection on Ticket update',
+    collection: 'tickets',
+    docId: 'ticket_1234',
+    operation: 'update',
+    auth: { uid: 'user_1', email_verified: true },
+    payload: {
+      status: 'pausado',
+      isVerifiedAdmin: true,
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 4,
+    name: 'Orphaned Ticket Creation without existing Company',
+    collection: 'tickets',
+    docId: 'ticket_1234',
+    operation: 'create',
+    auth: { uid: 'user_1', email_verified: true },
+    payload: {
+      issueNumber: 1234,
+      title: 'Falha no webhook de produção',
+      description: 'Erro 502 no gateway',
+      companyId: 'missing_company_id',
+      companyName: 'XPTO',
+      assigneeName: 'Felipe',
+      githubAssignee: 'felipe',
+      githubRepo: 'xpto/platform',
+      githubIssueUrl: 'https://github.com/xpto/platform/issues/1234',
+      githubState: 'open',
+      status: 'em_atendimento',
+      priority: 'alta',
+      labelsSummary: 'bug, production',
+      commentsCount: 2,
+      lastCommentSummary: 'Investigando logs',
+      totalSecondsWorked: 9105,
+      activeSessionStartedAtMs: 0,
+      ownerId: 'user_1',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 5,
+    name: 'Cross-Tenant Relational Hijack on AttendanceSession create',
+    collection: 'sessions',
+    docId: 'sess_01',
+    operation: 'create',
+    auth: { uid: 'user_1', email_verified: true },
+    payload: {
+      ticketId: 'ticket_owned_by_user_2',
+      issueNumber: 1234,
+      ticketTitle: 'Chamado #1234',
+      companyName: 'XPTO',
+      agentName: 'Felipe',
+      startedAtIso: '2026-10-20T10:00:00.000Z',
+      endedAtIso: '',
+      durationSeconds: 0,
+      notes: 'Início do diagnóstico',
+      sessionStatus: 'em_andamento',
+      ownerId: 'user_1',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 6,
+    name: 'Denial-of-Wallet Invalid Characters in Document ID',
+    collection: 'companies',
+    docId: 'invalid$doc!id/attack',
+    operation: 'create',
+    auth: { uid: 'user_1', email_verified: true },
+    payload: {},
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 7,
+    name: 'Oversized String Payload on Ticket title',
+    collection: 'tickets',
+    docId: 'ticket_oversized',
+    operation: 'create',
+    auth: { uid: 'user_1', email_verified: true },
+    payload: {
+      title: 'A'.repeat(1000),
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 8,
+    name: 'Invalid Enum State on Ticket status',
+    collection: 'tickets',
+    docId: 'ticket_1234',
+    operation: 'update',
+    auth: { uid: 'user_1', email_verified: true },
+    payload: {
+      status: 'bypassed_state',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 9,
+    name: 'Terminal State Mutation on Finalized AttendanceSession',
+    collection: 'sessions',
+    docId: 'sess_finalized',
+    operation: 'update',
+    auth: { uid: 'user_1', email_verified: true },
+    payload: {
+      durationSeconds: 999999,
+      sessionStatus: 'finalizada',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 10,
+    name: 'Immortal Field Tampering on Company ownerId',
+    collection: 'companies',
+    docId: 'comp_xpto',
+    operation: 'update',
+    auth: { uid: 'user_1', email_verified: true },
+    payload: {
+      ownerId: 'attacker_uid',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 11,
+    name: 'Forged Client Timestamp on AuditLog create',
+    collection: 'auditLogs',
+    docId: 'log_01',
+    operation: 'create',
+    auth: { uid: 'user_1', email_verified: true },
+    payload: {
+      eventType: 'webhook_github',
+      actorName: 'GitHub Bot',
+      targetLabel: 'Chamado #1234',
+      details: 'Timestamp falsificado',
+      origin: 'GitHub Webhook',
+      ownerId: 'user_1',
+      createdAt: '1999-01-01T00:00:00Z',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 12,
+    name: 'Immutable AuditLog Update Attempt',
+    collection: 'auditLogs',
+    docId: 'log_01',
+    operation: 'update',
+    auth: { uid: 'user_1', email_verified: true },
+    payload: {
+      details: 'Tentativa de apagar rastro de auditoria',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+];

@@ -1,0 +1,299 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 4.1: Global Safety Net (Default-Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    // Connection health check endpoint
+    match /test/{docId} {
+      allow get: if isSignedIn() && isValidId(docId);
+    }
+
+    // 1. Validation Blueprint: Company
+    function isValidCompany(data) {
+      return data.keys().hasAll([
+        'name', 'code', 'githubRepo', 'slaHours', 'hourlyRate',
+        'contractHours', 'status', 'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'name', 'code', 'githubRepo', 'slaHours', 'hourlyRate',
+        'contractHours', 'status', 'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+      data.code is string && data.code.size() >= 1 && data.code.size() <= 32 && data.code.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.githubRepo is string && data.githubRepo.size() >= 3 && data.githubRepo.size() <= 160 &&
+      data.slaHours is number && data.slaHours >= 1 && data.slaHours <= 720 &&
+      data.hourlyRate is number && data.hourlyRate >= 0 && data.hourlyRate <= 100000 &&
+      data.contractHours is number && data.contractHours >= 0 && data.contractHours <= 10000 &&
+      data.status in ['active', 'paused', 'archived'] &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    match /companies/{companyId} {
+      allow get: if isSignedIn() && isValidId(companyId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(companyId) && isValidCompany(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidCompany(incoming()) && isValidId(companyId) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (existing().status != 'archived' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'code', 'githubRepo', 'slaHours', 'hourlyRate', 'contractHours', 'status', 'updatedAt'])) ||
+          (existing().status == 'archived' && incoming().status == 'active' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(companyId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 2. Validation Blueprint: TeamMember
+    function isValidTeamMember(data) {
+      return data.keys().hasAll([
+        'name', 'roleTitle', 'githubHandle', 'specialty',
+        'hourlyCost', 'status', 'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'name', 'roleTitle', 'githubHandle', 'specialty',
+        'hourlyCost', 'status', 'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+      data.roleTitle is string && data.roleTitle.size() >= 1 && data.roleTitle.size() <= 100 &&
+      data.githubHandle is string && data.githubHandle.size() >= 1 && data.githubHandle.size() <= 80 &&
+      data.specialty is string && data.specialty.size() >= 1 && data.specialty.size() <= 120 &&
+      data.hourlyCost is number && data.hourlyCost >= 0 && data.hourlyCost <= 100000 &&
+      data.status in ['disponivel', 'em_atendimento', 'ausente'] &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    match /teamMembers/{memberId} {
+      allow get: if isSignedIn() && isValidId(memberId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(memberId) && isValidTeamMember(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidTeamMember(incoming()) && isValidId(memberId) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'roleTitle', 'githubHandle', 'specialty', 'hourlyCost', 'status', 'updatedAt'])
+        );
+      allow delete: if isSignedIn() && isValidId(memberId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 3. Validation Blueprint: Ticket
+    function isValidTicket(data) {
+      return data.keys().hasAll([
+        'issueNumber', 'title', 'description', 'companyId', 'companyName',
+        'assigneeName', 'githubAssignee', 'githubRepo', 'githubIssueUrl',
+        'githubState', 'status', 'priority', 'labelsSummary', 'commentsCount',
+        'lastCommentSummary', 'totalSecondsWorked', 'activeSessionStartedAtMs',
+        'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'issueNumber', 'title', 'description', 'companyId', 'companyName',
+        'assigneeName', 'githubAssignee', 'githubRepo', 'githubIssueUrl',
+        'githubState', 'status', 'priority', 'labelsSummary', 'commentsCount',
+        'lastCommentSummary', 'totalSecondsWorked', 'activeSessionStartedAtMs',
+        'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.issueNumber is number && data.issueNumber >= 1 && data.issueNumber <= 99999999 &&
+      data.title is string && data.title.size() >= 1 && data.title.size() <= 240 &&
+      data.description is string && data.description.size() >= 0 && data.description.size() <= 4000 &&
+      data.companyId is string && data.companyId.size() >= 1 && data.companyId.size() <= 128 && data.companyId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.companyName is string && data.companyName.size() >= 1 && data.companyName.size() <= 120 &&
+      data.assigneeName is string && data.assigneeName.size() >= 1 && data.assigneeName.size() <= 120 &&
+      data.githubAssignee is string && data.githubAssignee.size() >= 1 && data.githubAssignee.size() <= 80 &&
+      data.githubRepo is string && data.githubRepo.size() >= 3 && data.githubRepo.size() <= 160 &&
+      data.githubIssueUrl is string && data.githubIssueUrl.size() >= 0 && data.githubIssueUrl.size() <= 400 &&
+      data.githubState in ['open', 'closed'] &&
+      data.status in ['aberto', 'em_atendimento', 'pausado', 'encerrado'] &&
+      data.priority in ['baixa', 'media', 'alta', 'critica'] &&
+      data.labelsSummary is string && data.labelsSummary.size() >= 0 && data.labelsSummary.size() <= 300 &&
+      data.commentsCount is number && data.commentsCount >= 0 && data.commentsCount <= 100000 &&
+      data.lastCommentSummary is string && data.lastCommentSummary.size() >= 0 && data.lastCommentSummary.size() <= 500 &&
+      data.totalSecondsWorked is number && data.totalSecondsWorked >= 0 && data.totalSecondsWorked <= 315360000 &&
+      data.activeSessionStartedAtMs is number && data.activeSessionStartedAtMs >= 0 &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    match /tickets/{ticketId} {
+      allow get: if isSignedIn() && isValidId(ticketId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(ticketId) && isValidTicket(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/companies/$(incoming().companyId)) &&
+        get(/databases/$(database)/documents/companies/$(incoming().companyId)).data.ownerId == request.auth.uid;
+      allow update: if isSignedIn() && isValidTicket(incoming()) && isValidId(ticketId) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().companyId == existing().companyId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          // Action 1: Timer / Session state transition (Iniciar, Pausar, Encerrar) while not yet encerrado
+          (existing().status != 'encerrado' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'githubState', 'totalSecondsWorked', 'activeSessionStartedAtMs',
+              'lastCommentSummary', 'commentsCount', 'updatedAt'
+            ])) ||
+          // Action 2: Reopen a closed ticket
+          (existing().status == 'encerrado' && incoming().status == 'pausado' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'githubState', 'updatedAt'
+            ])) ||
+          // Action 3: GitHub Webhook / API sync metadata update on non-closed tickets
+          (existing().status != 'encerrado' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title', 'description', 'assigneeName', 'githubAssignee', 'githubState',
+              'status', 'priority', 'labelsSummary', 'commentsCount', 'lastCommentSummary', 'updatedAt'
+            ]))
+        );
+      allow delete: if isSignedIn() && isValidId(ticketId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 4. Validation Blueprint: AttendanceSession
+    function isValidAttendanceSession(data) {
+      return data.keys().hasAll([
+        'ticketId', 'issueNumber', 'ticketTitle', 'companyName', 'agentName',
+        'startedAtIso', 'endedAtIso', 'durationSeconds', 'notes',
+        'sessionStatus', 'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ticketId', 'issueNumber', 'ticketTitle', 'companyName', 'agentName',
+        'startedAtIso', 'endedAtIso', 'durationSeconds', 'notes',
+        'sessionStatus', 'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.ticketId is string && data.ticketId.size() >= 1 && data.ticketId.size() <= 128 && data.ticketId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.issueNumber is number && data.issueNumber >= 1 && data.issueNumber <= 99999999 &&
+      data.ticketTitle is string && data.ticketTitle.size() >= 1 && data.ticketTitle.size() <= 240 &&
+      data.companyName is string && data.companyName.size() >= 1 && data.companyName.size() <= 120 &&
+      data.agentName is string && data.agentName.size() >= 1 && data.agentName.size() <= 120 &&
+      data.startedAtIso is string && data.startedAtIso.size() >= 10 && data.startedAtIso.size() <= 64 &&
+      data.endedAtIso is string && data.endedAtIso.size() >= 0 && data.endedAtIso.size() <= 64 &&
+      data.durationSeconds is number && data.durationSeconds >= 0 && data.durationSeconds <= 315360000 &&
+      data.notes is string && data.notes.size() >= 0 && data.notes.size() <= 1000 &&
+      data.sessionStatus in ['em_andamento', 'pausada', 'finalizada'] &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    match /sessions/{sessionId} {
+      allow get: if isSignedIn() && isValidId(sessionId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(sessionId) && isValidAttendanceSession(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/tickets/$(incoming().ticketId)) &&
+        get(/databases/$(database)/documents/tickets/$(incoming().ticketId)).data.ownerId == request.auth.uid;
+      allow update: if isSignedIn() && isValidAttendanceSession(incoming()) && isValidId(sessionId) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().ticketId == existing().ticketId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        existing().sessionStatus != 'finalizada' &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'endedAtIso', 'durationSeconds', 'notes', 'sessionStatus', 'updatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(sessionId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 5. Validation Blueprint: AuditLog (Immutable Append-Only)
+    function isValidAuditLog(data) {
+      return data.keys().hasAll([
+        'eventType', 'actorName', 'targetLabel', 'details', 'origin', 'ownerId', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'eventType', 'actorName', 'targetLabel', 'details', 'origin', 'ownerId', 'createdAt'
+      ]) &&
+      data.eventType in [
+        'webhook_github', 'sync_api', 'sessao_iniciada', 'sessao_pausada',
+        'chamado_encerrado', 'chamado_criado', 'empresa_cadastrada', 'relatorio_gerado'
+      ] &&
+      data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 120 &&
+      data.targetLabel is string && data.targetLabel.size() >= 1 && data.targetLabel.size() <= 200 &&
+      data.details is string && data.details.size() >= 1 && data.details.size() <= 1000 &&
+      data.origin in ['GitHub Webhook', 'GitHub REST API', 'Operador Web', 'Sistema'] &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp;
+    }
+
+    match /auditLogs/{logId} {
+      allow get: if isSignedIn() && isValidId(logId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(logId) && isValidAuditLog(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // 6. Validation Blueprint: ReportRecord (Immutable Append-Only)
+    function isValidReportRecord(data) {
+      return data.keys().hasAll([
+        'title', 'companyFilter', 'periodLabel', 'totalTickets',
+        'totalSeconds', 'totalBilledAmount', 'generatedBy', 'ownerId', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'title', 'companyFilter', 'periodLabel', 'totalTickets',
+        'totalSeconds', 'totalBilledAmount', 'generatedBy', 'ownerId', 'createdAt'
+      ]) &&
+      data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+      data.companyFilter is string && data.companyFilter.size() >= 1 && data.companyFilter.size() <= 120 &&
+      data.periodLabel is string && data.periodLabel.size() >= 1 && data.periodLabel.size() <= 100 &&
+      data.totalTickets is number && data.totalTickets >= 0 && data.totalTickets <= 1000000 &&
+      data.totalSeconds is number && data.totalSeconds >= 0 && data.totalSeconds <= 315360000 &&
+      data.totalBilledAmount is number && data.totalBilledAmount >= 0 && data.totalBilledAmount <= 1000000000 &&
+      data.generatedBy is string && data.generatedBy.size() >= 1 && data.generatedBy.size() <= 120 &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp;
+    }
+
+    match /reports/{reportId} {
+      allow get: if isSignedIn() && isValidId(reportId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(reportId) && isValidReportRecord(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isSignedIn() && isValidId(reportId) && existing().ownerId == request.auth.uid;
+    }
+  }
+}

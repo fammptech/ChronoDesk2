@@ -1,0 +1,6 @@
+{
+  "name": "ChronoDesk — Gestão de Chamados & GitHub Issues",
+  "description": "Sistema corporativo de gestão de chamados integrado ao GitHub Issues com controle de sessões de atendimento, apontamento de horas, empresas, equipe, auditoria e relatórios.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

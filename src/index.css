@@ -1,0 +1,401 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-display: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-sans: 'Public Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #F8FAFC;
+    color: #0F172A;
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+  }
+
+  .font-mono, .tabular-nums {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ==========================================================================
+   THEME 2: GIT (GitHub Primer Dark + Git Orange #F05032 & GitHub Green #238636)
+   ========================================================================== */
+html[data-theme="git"] body,
+html[data-theme="git"] .bg-slate-50 {
+  background-color: #0D1117 !important;
+  color: #E6EDF3 !important;
+}
+
+html[data-theme="git"] .bg-slate-100,
+html[data-theme="git"] .bg-slate-100\/90,
+html[data-theme="git"] .bg-slate-200\/70 {
+  background-color: #161B22 !important;
+  color: #E6EDF3 !important;
+}
+
+html[data-theme="git"] .bg-white {
+  background-color: #21262D !important;
+  color: #E6EDF3 !important;
+}
+
+html[data-theme="git"] .bg-slate-900 {
+  background-color: #161B22 !important;
+  color: #E6EDF3 !important;
+}
+
+html[data-theme="git"] .bg-slate-950 {
+  background-color: #0D1117 !important;
+  color: #E6EDF3 !important;
+}
+
+html[data-theme="git"] header.bg-white {
+  background-color: #161B22 !important;
+  border-bottom-color: #30363D !important;
+}
+
+html[data-theme="git"] .border-slate-200,
+html[data-theme="git"] .border-slate-300,
+html[data-theme="git"] .border-slate-800,
+html[data-theme="git"] .border-slate-900,
+html[data-theme="git"] .border-slate-100,
+html[data-theme="git"] .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #30363D !important;
+}
+
+html[data-theme="git"] .text-slate-900,
+html[data-theme="git"] .text-slate-800 {
+  color: #E6EDF3 !important;
+}
+
+html[data-theme="git"] .text-slate-700,
+html[data-theme="git"] .text-slate-600 {
+  color: #C9D1D9 !important;
+}
+
+html[data-theme="git"] .text-slate-500,
+html[data-theme="git"] .text-slate-400 {
+  color: #8B949E !important;
+}
+
+html[data-theme="git"] .hover\:bg-slate-50:hover,
+html[data-theme="git"] .hover\:bg-slate-100:hover {
+  background-color: #292E36 !important;
+}
+
+html[data-theme="git"] .bg-slate-100\/90.border-slate-200 {
+  background-color: #161B22 !important;
+  border-color: #30363D !important;
+}
+
+/* Git Accent Buttons & Active Nav in GIT theme */
+html[data-theme="git"] header button.border-slate-900 {
+  border-bottom-color: #F05032 !important;
+  color: #FFFFFF !important;
+}
+
+html[data-theme="git"] header .bg-slate-900,
+html[data-theme="git"] button.bg-slate-900 {
+  background-color: #238636 !important;
+  color: #FFFFFF !important;
+  border: 1px solid rgba(240, 246, 252, 0.1) !important;
+}
+
+html[data-theme="git"] header .bg-slate-900:hover,
+html[data-theme="git"] button.bg-slate-900:hover {
+  background-color: #2EA043 !important;
+}
+
+html[data-theme="git"] .bg-emerald-600 {
+  background-color: #238636 !important;
+}
+
+html[data-theme="git"] .bg-emerald-600:hover {
+  background-color: #2EA043 !important;
+}
+
+html[data-theme="git"] .text-sky-700,
+html[data-theme="git"] .text-sky-400 {
+  color: #58A6FF !important;
+}
+
+html[data-theme="git"] .bg-emerald-50 {
+  background-color: rgba(35, 134, 54, 0.2) !important;
+  border-color: #238636 !important;
+  color: #7EE787 !important;
+}
+
+html[data-theme="git"] .bg-amber-100 {
+  background-color: rgba(240, 80, 50, 0.18) !important;
+  border-color: #F05032 !important;
+  color: #FFA198 !important;
+}
+
+html[data-theme="git"] input,
+html[data-theme="git"] select,
+html[data-theme="git"] textarea,
+html[data-theme="git"] button[role="combobox"] {
+  background-color: #0D1117 !important;
+  color: #E6EDF3 !important;
+  border-color: #30363D !important;
+}
+
+html[data-theme="git"] [role="option"][data-highlighted] {
+  background-color: #292E36 !important;
+  color: #FFFFFF !important;
+}
+
+html[data-theme="git"] .ring-slate-900 {
+  --tw-ring-color: #F05032 !important;
+  border-color: #F05032 !important;
+}
+
+/* ==========================================================================
+   THEME 3: ZDT (Baseado na Identidade ZDT: Royal Blue #0052FF, Aqua Cyan #00E5E5, Branco #FFFFFF)
+   ========================================================================== */
+html[data-theme="zdt"] body,
+html[data-theme="zdt"] .bg-slate-50 {
+  background-color: #041542 !important;
+  color: #FFFFFF !important;
+}
+
+html[data-theme="zdt"] .bg-slate-100,
+html[data-theme="zdt"] .bg-slate-100\/90,
+html[data-theme="zdt"] .bg-slate-200\/70 {
+  background-color: #07226B !important;
+  color: #FFFFFF !important;
+}
+
+html[data-theme="zdt"] .bg-white {
+  background-color: #0B2E8A !important;
+  color: #FFFFFF !important;
+}
+
+html[data-theme="zdt"] header.bg-white {
+  background-color: #0046E5 !important;
+  border-bottom-color: #00E5E5 !important;
+}
+
+html[data-theme="zdt"] .bg-slate-900 {
+  background-color: #003BD1 !important;
+  color: #FFFFFF !important;
+  border-color: #1E63FF !important;
+}
+
+html[data-theme="zdt"] .bg-slate-950 {
+  background-color: #041A57 !important;
+  color: #FFFFFF !important;
+  border-color: #1952D6 !important;
+}
+
+html[data-theme="zdt"] .border-slate-200,
+html[data-theme="zdt"] .border-slate-300,
+html[data-theme="zdt"] .border-slate-800,
+html[data-theme="zdt"] .border-slate-900,
+html[data-theme="zdt"] .border-slate-100,
+html[data-theme="zdt"] .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1B4FBF !important;
+}
+
+html[data-theme="zdt"] .text-slate-900,
+html[data-theme="zdt"] .text-slate-800 {
+  color: #FFFFFF !important;
+}
+
+html[data-theme="zdt"] .text-slate-700,
+html[data-theme="zdt"] .text-slate-600 {
+  color: #D6E6FF !important;
+}
+
+html[data-theme="zdt"] .text-slate-500,
+html[data-theme="zdt"] .text-slate-400 {
+  color: #99C2FF !important;
+}
+
+html[data-theme="zdt"] .hover\:bg-slate-50:hover,
+html[data-theme="zdt"] .hover\:bg-slate-100:hover {
+  background-color: #103CA8 !important;
+}
+
+html[data-theme="zdt"] header button.border-slate-900 {
+  border-bottom-color: #00E5E5 !important;
+  color: #00E5E5 !important;
+}
+
+html[data-theme="zdt"] button.bg-slate-900 {
+  background-color: #00E5E5 !important;
+  color: #031542 !important;
+  font-weight: 700 !important;
+}
+
+html[data-theme="zdt"] button.bg-slate-900:hover {
+  background-color: #33FFFF !important;
+}
+
+html[data-theme="zdt"] .bg-emerald-600 {
+  background-color: #00E5E5 !important;
+  color: #031542 !important;
+}
+
+html[data-theme="zdt"] .bg-emerald-600:hover {
+  background-color: #33FFFF !important;
+}
+
+html[data-theme="zdt"] .text-sky-700,
+html[data-theme="zdt"] .text-sky-400,
+html[data-theme="zdt"] .text-emerald-400 {
+  color: #00E5E5 !important;
+}
+
+html[data-theme="zdt"] .bg-emerald-50 {
+  background-color: rgba(0, 229, 229, 0.18) !important;
+  border-color: #00E5E5 !important;
+  color: #00E5E5 !important;
+}
+
+html[data-theme="zdt"] .bg-amber-100 {
+  background-color: rgba(0, 82, 255, 0.45) !important;
+  border-color: #00E5E5 !important;
+  color: #FFFFFF !important;
+}
+
+html[data-theme="zdt"] input,
+html[data-theme="zdt"] select,
+html[data-theme="zdt"] textarea,
+html[data-theme="zdt"] button[role="combobox"] {
+  background-color: #051A52 !important;
+  color: #FFFFFF !important;
+  border-color: #1E56D0 !important;
+}
+
+html[data-theme="zdt"] [role="option"][data-highlighted] {
+  background-color: #103CA8 !important;
+  color: #00E5E5 !important;
+}
+
+html[data-theme="zdt"] input::placeholder {
+  color: #7FA8F5 !important;
+}
+
+html[data-theme="zdt"] .ring-slate-900 {
+  --tw-ring-color: #00E5E5 !important;
+  border-color: #00E5E5 !important;
+}
+
+/* ==========================================================================
+   THEME 4: FULL DARK (Obsidian High-Contrast Dark Mode)
+   ========================================================================== */
+html[data-theme="dark"] body,
+html[data-theme="dark"] .bg-slate-50 {
+  background-color: #09090B !important;
+  color: #F4F4F5 !important;
+}
+
+html[data-theme="dark"] .bg-slate-100,
+html[data-theme="dark"] .bg-slate-100\/90,
+html[data-theme="dark"] .bg-slate-200\/70 {
+  background-color: #121216 !important;
+  color: #F4F4F5 !important;
+}
+
+html[data-theme="dark"] .bg-white {
+  background-color: #18181E !important;
+  color: #F4F4F5 !important;
+}
+
+html[data-theme="dark"] header.bg-white {
+  background-color: #0E0E12 !important;
+  border-bottom-color: #27272A !important;
+}
+
+html[data-theme="dark"] .bg-slate-900 {
+  background-color: #121216 !important;
+  color: #F4F4F5 !important;
+}
+
+html[data-theme="dark"] .bg-slate-950 {
+  background-color: #09090B !important;
+  color: #F4F4F5 !important;
+}
+
+html[data-theme="dark"] .border-slate-200,
+html[data-theme="dark"] .border-slate-300,
+html[data-theme="dark"] .border-slate-800,
+html[data-theme="dark"] .border-slate-900,
+html[data-theme="dark"] .border-slate-100,
+html[data-theme="dark"] .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #27272A !important;
+}
+
+html[data-theme="dark"] .text-slate-900,
+html[data-theme="dark"] .text-slate-800 {
+  color: #FAFAFA !important;
+}
+
+html[data-theme="dark"] .text-slate-700,
+html[data-theme="dark"] .text-slate-600 {
+  color: #D4D4D8 !important;
+}
+
+html[data-theme="dark"] .text-slate-500,
+html[data-theme="dark"] .text-slate-400 {
+  color: #A1A1AA !important;
+}
+
+html[data-theme="dark"] .hover\:bg-slate-50:hover,
+html[data-theme="dark"] .hover\:bg-slate-100:hover {
+  background-color: #22222A !important;
+}
+
+html[data-theme="dark"] header button.border-slate-900 {
+  border-bottom-color: #38BDF8 !important;
+  color: #FFFFFF !important;
+}
+
+html[data-theme="dark"] button.bg-slate-900 {
+  background-color: #27272A !important;
+  color: #FAFAFA !important;
+  border: 1px solid #3F3F46 !important;
+}
+
+html[data-theme="dark"] button.bg-slate-900:hover {
+  background-color: #3F3F46 !important;
+}
+
+html[data-theme="dark"] .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.16) !important;
+  border-color: #10B981 !important;
+  color: #6EE7B7 !important;
+}
+
+html[data-theme="dark"] .bg-amber-100 {
+  background-color: rgba(245, 158, 11, 0.16) !important;
+  border-color: #F59E0B !important;
+  color: #FCD34D !important;
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] button[role="combobox"] {
+  background-color: #0E0E12 !important;
+  color: #FAFAFA !important;
+  border-color: #27272A !important;
+}
+
+html[data-theme="dark"] [role="option"][data-highlighted] {
+  background-color: #27272A !important;
+  color: #FAFAFA !important;
+}
+
+html[data-theme="dark"] .ring-slate-900 {
+  --tw-ring-color: #38BDF8 !important;
+  border-color: #38BDF8 !important;
+}
