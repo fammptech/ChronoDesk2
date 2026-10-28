@@ -16,6 +16,7 @@ import {
   Plus,
   RefreshCw,
   AlertTriangle,
+  Eye,
 } from 'lucide-react';
 import { auth, signInWithGoogle, signOutUser } from './firebase';
 import {
@@ -24,6 +25,7 @@ import {
   createCompanyRecord,
   createTeamMemberRecord,
   updateTeamMemberStatus,
+  updateTeamMemberPermissions,
   createTicketRecord,
   updateTicketTimerAction,
   reopenClosedTicketAction,
@@ -34,6 +36,7 @@ import {
   deleteReportRecord,
 } from './neonDb';
 import {
+  AtendentePermissionRules,
   Company,
   TeamMember,
   Ticket,
@@ -73,6 +76,7 @@ import { DashboardReportsView } from './components/DashboardReportsView';
 import { HoursReportsView } from './components/HoursReportsView';
 import { WorkHoursConfigPanel } from './components/WorkHoursConfigPanel';
 import { NeonMigrationsPanel } from './components/NeonMigrationsPanel';
+import { LoginScreen } from './components/LoginScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   WorkHoursSettings,
@@ -151,11 +155,16 @@ const INITIAL_ZDT_COMPANIES: Company[] = [
 const INITIAL_ZDT_TEAM: TeamMember[] = PROJECT_ZDT_USERS.slice(0, 9).map((u, idx) => ({
   id: `mem_${u.login}`,
   name: u.name,
+  email: idx === 0 ? 'fammp.tech@gmail.com' : `${u.login.toLowerCase()}@zdt.com.br`,
   roleTitle: idx === 0 ? 'Gestão / Governança ZDT' : 'Especialista Sustentação & Projetos ZDT',
   githubHandle: u.login,
   specialty: 'N1 / Atendimento / Sustentação / Desenvolvimento',
   hourlyCost: 160,
   status: idx === 0 ? 'em_atendimento' : 'disponivel',
+  accessRole: idx === 0 ? 'admin' : 'atendente',
+  restrictTimerToAssignedOnly: true,
+  defaultFilterMyCardsOnLogin: true,
+  allowViewAllTechniciansFilter: true,
   ownerId: 'demo',
 }));
 
@@ -184,6 +193,18 @@ function resolveUserDisplayName(githubLogin: string): string {
     (u) => u.login.toLowerCase() === (githubLogin || '').toLowerCase()
   );
   return found ? found.name : githubLogin || 'Felipe Olio';
+}
+
+async function safeParseResponseJson(res: Response): Promise<Record<string, any> | null> {
+  try {
+    const text = await res.text();
+    if (!text || text.trim().startsWith('<')) {
+      return null;
+    }
+    return JSON.parse(text) as Record<string, any>;
+  } catch {
+    return null;
+  }
 }
 
 function ChronoDeskWorkspace() {
@@ -291,12 +312,54 @@ function ChronoDeskWorkspace() {
   }, []);
 
   const [selectedIssueNumber, setSelectedIssueNumber] = useState<number>(0);
+  const [openCardModalIssueNumber, setOpenCardModalIssueNumber] = useState<number | null>(null);
   const [ticketStatusFilter, setTicketStatusFilter] = useState<'todos' | Ticket['status']>('todos');
   const [companyFilter, setCompanyFilter] = useState<string>('ALL');
+  const [technicianFilter, setTechnicianFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sessionNote, setSessionNote] = useState<string>(
     'Atendimento técnico e atualização de status sincronizada com o GitHub Project #3.'
   );
+
+  // Global Atendente Permission Rules (configurable by Admin as Active or Inactive)
+  const [globalAtendenteRules, setGlobalAtendenteRules] = useState<AtendentePermissionRules>(() => {
+    try {
+      const raw = window.localStorage.getItem('chronodesk_atendente_rules_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<AtendentePermissionRules>;
+        return {
+          restrictTimerToAssignedOnly: parsed.restrictTimerToAssignedOnly ?? true,
+          defaultFilterMyCardsOnLogin: parsed.defaultFilterMyCardsOnLogin ?? true,
+          allowViewAllTechniciansFilter: parsed.allowViewAllTechniciansFilter ?? true,
+        };
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return {
+      restrictTimerToAssignedOnly: true,
+      defaultFilterMyCardsOnLogin: true,
+      allowViewAllTechniciansFilter: true,
+    };
+  });
+
+  const [selectedOperatorId, setSelectedOperatorId] = useState<string>(() => {
+    try {
+      const saved = window.localStorage.getItem('chronodesk_active_operator_v1');
+      if (saved) return saved;
+    } catch {
+      // ignore storage errors
+    }
+    return 'mem_felipeolio';
+  });
+
+  const [isOperatorLoggedIn, setIsOperatorLoggedIn] = useState<boolean>(() => {
+    try {
+      return window.sessionStorage.getItem('chronodesk_session_logged_in_v1') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
   const [busyAction, setBusyAction] = useState<boolean>(false);
@@ -378,7 +441,149 @@ function ChronoDeskWorkspace() {
   };
 
   const companies = dbCompanies.length > 0 ? dbCompanies : localCompanies;
-  const teamMembers = dbTeam.length > 0 ? dbTeam : localTeam;
+  const teamMembers = useMemo<TeamMember[]>(() => {
+    const raw = dbTeam.length > 0 ? dbTeam : localTeam;
+    return raw.map((m, idx) => ({
+      ...m,
+      accessRole:
+        m.accessRole ||
+        (m.githubHandle.toLowerCase() === 'felipeolio' || idx === 0 ? 'admin' : 'atendente'),
+      restrictTimerToAssignedOnly: m.restrictTimerToAssignedOnly ?? true,
+      defaultFilterMyCardsOnLogin: m.defaultFilterMyCardsOnLogin ?? true,
+      allowViewAllTechniciansFilter: m.allowViewAllTechniciansFilter ?? true,
+    }));
+  }, [dbTeam, localTeam]);
+
+  const currentOperator = useMemo<TeamMember>(() => {
+    return (
+      teamMembers.find((m) => m.id === selectedOperatorId) ||
+      teamMembers[0] ||
+      INITIAL_ZDT_TEAM[0]
+    );
+  }, [teamMembers, selectedOperatorId]);
+
+  const isCurrentOperatorAdmin = (currentOperator.accessRole || 'atendente') === 'admin';
+
+  const effectiveRestrictTimerToAssigned =
+    !isCurrentOperatorAdmin &&
+    globalAtendenteRules.restrictTimerToAssignedOnly &&
+    (currentOperator.restrictTimerToAssignedOnly ?? true);
+
+  const effectiveDefaultFilterMyCards =
+    !isCurrentOperatorAdmin &&
+    globalAtendenteRules.defaultFilterMyCardsOnLogin &&
+    (currentOperator.defaultFilterMyCardsOnLogin ?? true);
+
+  const effectiveAllowViewAllTechnicians =
+    isCurrentOperatorAdmin ||
+    (globalAtendenteRules.allowViewAllTechniciansFilter &&
+      (currentOperator.allowViewAllTechniciansFilter ?? true));
+
+  // Enforce technicianFilter lock if Atendente is not allowed to filter other technicians
+  useEffect(() => {
+    if (!effectiveAllowViewAllTechnicians && technicianFilter !== currentOperator.githubHandle) {
+      setTechnicianFilter(currentOperator.githubHandle);
+    }
+  }, [effectiveAllowViewAllTechnicians, technicianFilter, currentOperator.githubHandle]);
+
+  const handleSelectOperator = useCallback(
+    (memberId: string) => {
+      setSelectedOperatorId(memberId);
+      setIsOperatorLoggedIn(true);
+      try {
+        window.localStorage.setItem('chronodesk_active_operator_v1', memberId);
+        window.sessionStorage.setItem('chronodesk_session_logged_in_v1', 'true');
+      } catch {
+        // ignore storage errors
+      }
+      const target = teamMembers.find((m) => m.id === memberId);
+      if (!target) return;
+
+      const isTargetAdmin = (target.accessRole || 'atendente') === 'admin';
+      const shouldFilterOwnCards =
+        !isTargetAdmin &&
+        globalAtendenteRules.defaultFilterMyCardsOnLogin &&
+        (target.defaultFilterMyCardsOnLogin ?? true);
+
+      if (shouldFilterOwnCards) {
+        setTechnicianFilter(target.githubHandle);
+        const firstAssignedCard = boardCards.find((c) =>
+          c.assignees.some((a) => a.toLowerCase() === target.githubHandle.toLowerCase())
+        );
+        if (firstAssignedCard) {
+          setSelectedIssueNumber(firstAssignedCard.issueNumber);
+        }
+        setStatusBanner(
+          `Logado como ${target.name} (@${target.githubHandle} · Perfil Atendente). Visualizando seus cards filtrados por padrão — caso queira, altere o filtro de técnico para "Todos os Técnicos".`
+        );
+      } else {
+        setTechnicianFilter('ALL');
+        setStatusBanner(
+          isTargetAdmin
+            ? `Logado como ${target.name} (@${target.githubHandle} · Perfil Admin — Acesso Full).`
+            : `Logado como ${target.name} (@${target.githubHandle} · Perfil Atendente).`
+        );
+      }
+    },
+    [teamMembers, globalAtendenteRules.defaultFilterMyCardsOnLogin, boardCards]
+  );
+
+  const handleLogoutOperator = useCallback(() => {
+    setIsOperatorLoggedIn(false);
+    try {
+      window.sessionStorage.removeItem('chronodesk_session_logged_in_v1');
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  const handleUpdateGlobalAtendenteRules = useCallback(
+    async (nextRules: AtendentePermissionRules) => {
+      setGlobalAtendenteRules(nextRules);
+      try {
+        window.localStorage.setItem('chronodesk_atendente_rules_v1', JSON.stringify(nextRules));
+      } catch {
+        // ignore storage errors
+      }
+      setLocalTeam((prev) =>
+        prev.map((m) =>
+          (m.accessRole || 'atendente') === 'atendente'
+            ? {
+                ...m,
+                restrictTimerToAssignedOnly: nextRules.restrictTimerToAssignedOnly,
+                defaultFilterMyCardsOnLogin: nextRules.defaultFilterMyCardsOnLogin,
+                allowViewAllTechniciansFilter: nextRules.allowViewAllTechniciansFilter,
+              }
+            : m
+        )
+      );
+      setDbTeam((prev) =>
+        prev.map((m) =>
+          (m.accessRole || 'atendente') === 'atendente'
+            ? {
+                ...m,
+                restrictTimerToAssignedOnly: nextRules.restrictTimerToAssignedOnly,
+                defaultFilterMyCardsOnLogin: nextRules.defaultFilterMyCardsOnLogin,
+                allowViewAllTechniciansFilter: nextRules.allowViewAllTechniciansFilter,
+              }
+            : m
+        )
+      );
+      if (
+        !isCurrentOperatorAdmin &&
+        nextRules.defaultFilterMyCardsOnLogin &&
+        technicianFilter === 'ALL'
+      ) {
+        setTechnicianFilter(currentOperator.githubHandle);
+      }
+      if (!isCurrentOperatorAdmin && !nextRules.allowViewAllTechniciansFilter) {
+        setTechnicianFilter(currentOperator.githubHandle);
+      }
+      setStatusBanner('Permissões globais do perfil Atendente atualizadas pelo Admin!');
+    },
+    [isCurrentOperatorAdmin, technicianFilter, currentOperator.githubHandle]
+  );
+
   const rawTickets = dbTickets.length > 0 ? dbTickets : localTickets;
 
   // Enforce that a ticket NEVER has status 'em_atendimento' or activeSessionStartedAtMs > 0
@@ -542,7 +747,10 @@ function ChronoDeskWorkspace() {
       const res = await fetch(`/api/github/project-board?_t=${Date.now()}`, {
         cache: 'no-store',
       });
-      const data = await res.json();
+      const data = await safeParseResponseJson(res);
+      if (!data) {
+        return;
+      }
 
       if (!data.connected) {
         setProjectMeta((prev) => ({
@@ -598,7 +806,7 @@ function ChronoDeskWorkspace() {
         });
       });
 
-      // If authenticated with Firestore, sync any changed cards to Firestore
+      // If authenticated with user, sync any changed cards to Neon DB
       if (user) {
         for (const card of fetchedCards) {
           const existing = dbTickets.find((t) => t.issueNumber === card.issueNumber);
@@ -610,7 +818,6 @@ function ChronoDeskWorkspace() {
               `tkt_${card.issueNumber}_${user.uid.slice(0, 8)}`
             );
           } else {
-            // If Firestore had a stale running timer that is NOT active in activeTimersRef, pause it cleanly in Firestore
             if (
               (existing.status === 'em_atendimento' || existing.activeSessionStartedAtMs > 0) &&
               !activeTimersRef.current[card.issueNumber] &&
@@ -669,9 +876,9 @@ function ChronoDeskWorkspace() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ limit: 15 }),
         })
-          .then((r) => r.json())
+          .then((r) => safeParseResponseJson(r))
           .then((mirrorData) => {
-            if (mirrorData.ok && mirrorData.linkedCount > 0) {
+            if (mirrorData && mirrorData.ok && mirrorData.linkedCount > 0) {
               setProjectMeta((prev) => ({
                 ...prev,
                 personalProjectItemCount: mirrorData.linkedCount,
@@ -683,8 +890,8 @@ function ChronoDeskWorkspace() {
           })
           .catch(() => {});
       }
-    } catch (err) {
-      console.error('GitHub board sync error:', err);
+    } catch {
+      // Ignore transient network or server reload errors during sync
     } finally {
       setSyncingBoard(false);
     }
@@ -728,8 +935,8 @@ function ChronoDeskWorkspace() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ limit: 20 }),
       });
-      const data = await res.json();
-      if (data.ok) {
+      const data = await safeParseResponseJson(res);
+      if (data && data.ok) {
         setStatusBanner(data.message);
         await handlePullFromGitHubBoard();
       }
@@ -760,11 +967,71 @@ function ChronoDeskWorkspace() {
     };
   }, [selectedIssueNumber, boardCards, tickets, ticketsByIssueNumber, user, convertCardToTicketPayload]);
 
-  // Filter Board Cards by global search & company filter
+  // RBAC helper: check if currentOperator is allowed to start the timer on a given Card or Ticket
+  const checkCanStartTimerOnCard = useCallback(
+    (card: MirroredBoardCard): { allowed: boolean; reason?: string } => {
+      if (isCurrentOperatorAdmin || !effectiveRestrictTimerToAssigned) {
+        return { allowed: true };
+      }
+      const handleLower = currentOperator.githubHandle.toLowerCase();
+      const nameLower = currentOperator.name.toLowerCase();
+      const isAssigned = card.assignees.some(
+        (a) => a.toLowerCase() === handleLower || a.toLowerCase() === nameLower
+      );
+      if (!isAssigned) {
+        return {
+          allowed: false,
+          reason: `Permissão de Atendente (@${currentOperator.githubHandle}): Você só pode iniciar o timer em cards atribuídos a você. Este card está atribuído a ${
+            card.assignees.length > 0 ? card.assignees.map((a) => `@${a}`).join(', ') : 'outro técnico'
+          }.`,
+        };
+      }
+      return { allowed: true };
+    },
+    [isCurrentOperatorAdmin, effectiveRestrictTimerToAssigned, currentOperator]
+  );
+
+  const checkCanStartTimerOnTicket = useCallback(
+    (ticket: Ticket): { allowed: boolean; reason?: string } => {
+      if (isCurrentOperatorAdmin || !effectiveRestrictTimerToAssigned) {
+        return { allowed: true };
+      }
+      const matchingCard = boardCards.find((c) => c.issueNumber === ticket.issueNumber);
+      if (matchingCard) {
+        return checkCanStartTimerOnCard(matchingCard);
+      }
+      const handleLower = currentOperator.githubHandle.toLowerCase();
+      const nameLower = currentOperator.name.toLowerCase();
+      const isAssigned =
+        (ticket.githubAssignee || '').toLowerCase() === handleLower ||
+        (ticket.assigneeName || '').toLowerCase() === nameLower;
+      if (!isAssigned) {
+        return {
+          allowed: false,
+          reason: `Permissão de Atendente (@${currentOperator.githubHandle}): Você só pode iniciar o timer em cards atribuídos a você. Este card está atribuído a @${ticket.githubAssignee}.`,
+        };
+      }
+      return { allowed: true };
+    },
+    [
+      isCurrentOperatorAdmin,
+      effectiveRestrictTimerToAssigned,
+      currentOperator,
+      boardCards,
+      checkCanStartTimerOnCard,
+    ]
+  );
+
+  // Filter Board Cards by global search, company filter & technician filter
   const visibleBoardCards = useMemo(() => {
     return boardCards.filter((c) => {
       if (companyFilter !== 'ALL' && c.cliente.toLowerCase() !== companyFilter.toLowerCase()) {
         return false;
+      }
+      if (technicianFilter !== 'ALL') {
+        const techLower = technicianFilter.toLowerCase();
+        const hasTech = c.assignees.some((a) => a.toLowerCase() === techLower);
+        if (!hasTech) return false;
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -780,13 +1047,24 @@ function ChronoDeskWorkspace() {
       }
       return true;
     });
-  }, [boardCards, companyFilter, searchQuery]);
+  }, [boardCards, companyFilter, technicianFilter, searchQuery]);
 
   const filteredTickets = useMemo(() => {
     return tickets.filter((t) => {
       if (ticketStatusFilter !== 'todos' && t.status !== ticketStatusFilter) return false;
       if (companyFilter !== 'ALL' && t.companyName.toLowerCase() !== companyFilter.toLowerCase()) {
         return false;
+      }
+      if (technicianFilter !== 'ALL') {
+        const techLower = technicianFilter.toLowerCase();
+        const matchingCard = boardCards.find((c) => c.issueNumber === t.issueNumber);
+        const matchesCardAssignee = matchingCard?.assignees.some(
+          (a) => a.toLowerCase() === techLower
+        );
+        const matchesTicketAssignee = t.githubAssignee.toLowerCase() === techLower;
+        if (!matchesCardAssignee && !matchesTicketAssignee) {
+          return false;
+        }
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -801,7 +1079,7 @@ function ChronoDeskWorkspace() {
       }
       return true;
     });
-  }, [tickets, ticketStatusFilter, companyFilter, searchQuery]);
+  }, [tickets, ticketStatusFilter, companyFilter, technicianFilter, boardCards, searchQuery]);
 
   // Move Card to any of the 8 GitHub Status Columns
   const handleMoveCardToStatusColumn = async (
@@ -1311,6 +1589,16 @@ function ChronoDeskWorkspace() {
 
   // Start / Resume Timer on a Ticket or BoardCard (ONLY place that starts the timer)
   const handleStartOrResumeTicket = async (ticket: Ticket) => {
+    // RBAC Check: Atendente can only start timer on cards assigned to them when restrictTimerToAssignedOnly is Active
+    const permCheck = checkCanStartTimerOnTicket(ticket);
+    if (!permCheck.allowed) {
+      setStatusBanner(
+        permCheck.reason ||
+          'Permissão negada: Como Atendente, você só pode iniciar o timer de um card ao qual está atribuído.'
+      );
+      return;
+    }
+
     // If another card has an active timer running, pause and save it first!
     const otherRunningEntries = Object.entries(activeTimersRef.current).filter(
       ([issueNumStr, startedAt]) => Number(issueNumStr) !== ticket.issueNumber && startedAt > 0
@@ -1793,8 +2081,8 @@ function ChronoDeskWorkspace() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (data.ok) {
+      const data = await safeParseResponseJson(res);
+      if (data && data.ok) {
         await handlePullFromGitHubBoard();
         if (data.issueNumber) {
           setSelectedIssueNumber(Number(data.issueNumber));
@@ -1826,9 +2114,9 @@ function ChronoDeskWorkspace() {
     const res = await fetch(
       `/api/github/issues?repo=${encodeURIComponent(repo)}&limit=${limit}`
     );
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Erro ao consultar GitHub API');
+    const data = await safeParseResponseJson(res);
+    if (!res.ok || !data) {
+      throw new Error(data?.error || 'Erro ao consultar GitHub API');
     }
 
     await handlePullFromGitHubBoard();
@@ -1885,8 +2173,8 @@ function ChronoDeskWorkspace() {
       }),
     });
 
-    const data = await response.json();
-    if (!response.ok || !data.delivery?.normalizedIssue) {
+    const data = await safeParseResponseJson(response);
+    if (!response.ok || !data?.delivery?.normalizedIssue) {
       throw new Error('Falha ao processar payload no endpoint /api/webhooks/github.');
     }
     setStatusBanner(`Webhook #${issueNumber} recebido com sucesso.`);
@@ -1898,8 +2186,8 @@ function ChronoDeskWorkspace() {
       const res = await fetch(
         `/api/github/comments?repo=${encodeURIComponent(ticket.githubRepo)}&issueNumber=${ticket.issueNumber}`
       );
-      const data = await res.json();
-      if (res.ok && Array.isArray(data.comments) && data.comments.length > 0) {
+      const data = await safeParseResponseJson(res);
+      if (res.ok && data && Array.isArray(data.comments) && data.comments.length > 0) {
         setLiveComments(data.comments);
       } else {
         setLiveComments([
@@ -1924,6 +2212,18 @@ function ChronoDeskWorkspace() {
       setLoadingComments(false);
     }
   };
+
+  if (!isOperatorLoggedIn) {
+    return (
+      <LoginScreen
+        teamMembers={teamMembers}
+        globalAtendenteRules={globalAtendenteRules}
+        onLoginSuccess={(member) => {
+          handleSelectOperator(member.id);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
@@ -1974,7 +2274,7 @@ function ChronoDeskWorkspace() {
                 : 'border-transparent hover:text-slate-900'
             }`}
           >
-            Usuários / Equipe
+            Cadastro de Usuários
           </button>
           <button
             type="button"
@@ -2164,6 +2464,37 @@ function ChronoDeskWorkspace() {
             <Webhook className="w-3.5 h-3.5" />
             <span>Repositórios & Webhook</span>
           </button>
+          {/* Quick Active User / Role Switcher in Sub-Toolbar */}
+          <div className="inline-flex items-center gap-2">
+            <span className="text-slate-500 font-medium whitespace-nowrap">Usuário:</span>
+            <div className="w-56">
+              <Select value={currentOperator.id} onValueChange={handleSelectOperator}>
+                <SelectTrigger
+                  aria-label="Alternar usuário logado"
+                  className="h-7 text-xs bg-white border-slate-300"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {teamMembers.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {(m.accessRole || 'atendente') === 'admin' ? '[Admin] ' : '[Atendente] '}
+                      {m.name} (@{m.githubHandle})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <button
+              type="button"
+              onClick={handleLogoutOperator}
+              title="Sair da sessão atual e abrir a Tela de Login"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <LogOut className="w-3 h-3" />
+              <span>Trocar Login</span>
+            </button>
+          </div>
           <span aria-hidden="true">·</span>
           {user ? (
             <button
@@ -2181,7 +2512,7 @@ function ChronoDeskWorkspace() {
               className="inline-flex items-center gap-1.5 font-semibold text-sky-700 hover:text-sky-900 whitespace-nowrap shrink-0 cursor-pointer"
             >
               <LogIn className="w-3.5 h-3.5" />
-              <span>Conectar Conta Google (Firestore)</span>
+              <span>Conectar Conta Google</span>
             </button>
           )}
         </div>
@@ -2250,41 +2581,50 @@ function ChronoDeskWorkspace() {
         {activeNav === 'chamados' && (
           <div className="space-y-6">
             {/* Active Ticket Cockpit */}
-            {activeTicket && (
-              <ActiveTicketCockpit
-                ticket={activeTicket}
-                currentColumnName={
-                  boardCards.find((c) => c.issueNumber === activeTicket.issueNumber)
-                    ?.statusColumn ||
-                  (activeTicket.status === 'encerrado'
-                    ? 'Concluído'
-                    : activeTicket.status === 'em_atendimento'
-                    ? 'Em andamento'
-                    : 'Pronto para execução')
-                }
-                companies={companies}
-                teamMembers={teamMembers}
-                busyAction={busyAction}
-                sessionNote={sessionNote}
-                onChangeSessionNote={setSessionNote}
-                onStartOrResume={handleStartOrResumeTicket}
-                onPause={handlePauseTicket}
-                onCloseTicket={handleCloseTicket}
-                onReopenTicket={handleReopenTicket}
-                onFetchGitHubComments={handleFetchGitHubComments}
-                liveComments={liveComments}
-                loadingComments={loadingComments}
-                issueHistory={issueHistoryByNumber[activeTicket.issueNumber] || []}
-                onConfirmCommentOrClose={async (params) => {
-                  await handleConfirmCommentOrCloseIssue(activeTicket.issueNumber, params);
-                }}
-              />
-            )}
+            {activeTicket && (() => {
+              const cockpitPerm = checkCanStartTimerOnTicket(activeTicket);
+              return (
+                <ActiveTicketCockpit
+                  ticket={activeTicket}
+                  currentColumnName={
+                    boardCards.find((c) => c.issueNumber === activeTicket.issueNumber)
+                      ?.statusColumn ||
+                    (activeTicket.status === 'encerrado'
+                      ? 'Concluído'
+                      : activeTicket.status === 'em_atendimento'
+                      ? 'Em andamento'
+                      : 'Pronto para execução')
+                  }
+                  companies={companies}
+                  teamMembers={teamMembers}
+                  busyAction={busyAction}
+                  sessionNote={sessionNote}
+                  onChangeSessionNote={setSessionNote}
+                  onStartOrResume={handleStartOrResumeTicket}
+                  onPause={handlePauseTicket}
+                  onCloseTicket={handleCloseTicket}
+                  onReopenTicket={handleReopenTicket}
+                  onFetchGitHubComments={handleFetchGitHubComments}
+                  liveComments={liveComments}
+                  loadingComments={loadingComments}
+                  issueHistory={issueHistoryByNumber[activeTicket.issueNumber] || []}
+                  onConfirmCommentOrClose={async (params) => {
+                    await handleConfirmCommentOrCloseIssue(activeTicket.issueNumber, params);
+                  }}
+                  canStartTimer={cockpitPerm.allowed}
+                  startTimerBlockedReason={cockpitPerm.reason}
+                  onOpenCardDetail={() => {
+                    setViewMode('board');
+                    setOpenCardModalIssueNumber(activeTicket.issueNumber);
+                  }}
+                />
+              );
+            })()}
 
-            {/* Quick Global Search Bar */}
+            {/* Quick Global Search & Technician Filter Bar */}
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex flex-wrap items-center gap-3">
-                <div className="w-80">
+                <div className="w-72">
                   <Select value={companyFilter} onValueChange={setCompanyFilter}>
                     <SelectTrigger
                       aria-label="Filtrar por cliente"
@@ -2305,6 +2645,48 @@ function ChronoDeskWorkspace() {
                   </Select>
                 </div>
 
+                {/* Technician Filter (Defaults to My Cards for Atendente on login, switchable to All Technicians if allowed) */}
+                <div className="w-72">
+                  <Select
+                    value={technicianFilter}
+                    disabled={!effectiveAllowViewAllTechnicians}
+                    onValueChange={(val) => {
+                      if (!effectiveAllowViewAllTechnicians) {
+                        setTechnicianFilter(currentOperator.githubHandle);
+                        return;
+                      }
+                      setTechnicianFilter(val);
+                    }}
+                  >
+                    <SelectTrigger
+                      aria-label="Filtrar por técnico"
+                      className="w-full bg-white"
+                      title={
+                        !effectiveAllowViewAllTechnicians
+                          ? 'Permissão para filtrar todos os técnicos está inativa para Atendentes'
+                          : 'Filtrar por Técnico / Atendente'
+                      }
+                    >
+                      <SelectValue placeholder="Filtrar por técnico" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {effectiveAllowViewAllTechnicians && (
+                        <SelectItem value="ALL">
+                          Todos os Técnicos ({teamMembers.length})
+                        </SelectItem>
+                      )}
+                      {teamMembers.map((m) => (
+                        <SelectItem key={m.id} value={m.githubHandle}>
+                          {m.githubHandle.toLowerCase() ===
+                          currentOperator.githubHandle.toLowerCase()
+                            ? `Meus Cards: @${m.githubHandle} (${m.name})`
+                            : `Técnico: @${m.githubHandle} (${m.name})`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
@@ -2312,13 +2694,34 @@ function ChronoDeskWorkspace() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Buscar por #issue, cliente, título, usuário (@felipeolio), tag..."
-                    className="pl-8 pr-3 py-2 text-xs bg-white border border-slate-300 rounded-lg w-80"
+                    className="pl-8 pr-3 py-2 text-xs bg-white border border-slate-300 rounded-lg w-72"
                   />
                 </div>
               </div>
 
-              <div className="text-xs text-slate-500">
-                Qualquer alteração de coluna, horas, usuário, cliente ou tag reflete diretamente no GitHub Project.
+              <div className="text-xs text-slate-600 flex items-center gap-2">
+                <span>
+                  Operador:{' '}
+                  <strong className="text-slate-900">
+                    {currentOperator.name} (@{currentOperator.githubHandle})
+                  </strong>{' '}
+                  · Perfil:{' '}
+                  <strong className="text-slate-900">
+                    {isCurrentOperatorAdmin ? 'Admin (Acesso Full)' : 'Atendente'}
+                  </strong>
+                </span>
+                {!isCurrentOperatorAdmin &&
+                  technicianFilter.toLowerCase() ===
+                    currentOperator.githubHandle.toLowerCase() &&
+                  effectiveAllowViewAllTechnicians && (
+                    <button
+                      type="button"
+                      onClick={() => setTechnicianFilter('ALL')}
+                      className="text-xs font-semibold text-slate-900 underline underline-offset-2 cursor-pointer"
+                    >
+                      Ver Todos os Técnicos
+                    </button>
+                  )}
               </div>
             </div>
 
@@ -2372,6 +2775,13 @@ function ChronoDeskWorkspace() {
                 onConfirmCommentOrCloseCard={async (card, params) => {
                   await handleConfirmCommentOrCloseIssue(card.issueNumber, params);
                 }}
+                externalAssigneeFilter={technicianFilter}
+                onChangeExternalAssigneeFilter={setTechnicianFilter}
+                canViewAllTechnicians={effectiveAllowViewAllTechnicians}
+                currentOperatorHandle={currentOperator.githubHandle}
+                canStartTimerOnCard={checkCanStartTimerOnCard}
+                externalOpenIssueNumber={openCardModalIssueNumber}
+                onClearExternalOpenIssue={() => setOpenCardModalIssueNumber(null)}
               />
             ) : (
               /* Table View */
@@ -2472,6 +2882,19 @@ function ChronoDeskWorkspace() {
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleSelectIssueCard(t.issueNumber);
+                                      setViewMode('board');
+                                      setOpenCardModalIssueNumber(t.issueNumber);
+                                    }}
+                                    title="Abrir card e visualizar todo o conteúdo do GitHub"
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+                                  >
+                                    <Eye className="w-3 h-3" />
+                                    <span>Abrir Card</span>
+                                  </button>
                                   {t.status !== 'encerrado' &&
                                     (t.status === 'em_atendimento' ? (
                                       <button
@@ -2486,11 +2909,20 @@ function ChronoDeskWorkspace() {
                                     ) : (
                                       <button
                                         type="button"
-                                        disabled={busyAction}
+                                        disabled={busyAction || !checkCanStartTimerOnTicket(t)}
                                         onClick={() => {
                                           handleStartOrResumeTicket(t);
                                         }}
-                                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+                                        title={
+                                          checkCanStartTimerOnTicket(t)
+                                            ? 'Iniciar contagem de atendimento'
+                                            : `Permissão restrita: apenas @${t.githubAssignee || 'sem-atribuicao'} ou Admin pode iniciar este timer`
+                                        }
+                                        className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md whitespace-nowrap shrink-0 ${
+                                          checkCanStartTimerOnTicket(t)
+                                            ? 'text-white bg-emerald-600 hover:bg-emerald-500 cursor-pointer'
+                                            : 'text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed'
+                                        }`}
                                       >
                                         <Play className="w-3 h-3" />
                                         <span>Iniciar</span>
@@ -2564,15 +2996,23 @@ function ChronoDeskWorkspace() {
           <TeamView
             teamMembers={teamMembers}
             tickets={tickets}
+            currentOperator={currentOperator}
+            globalAtendenteRules={globalAtendenteRules}
+            onSelectOperator={handleSelectOperator}
+            onUpdateGlobalAtendenteRules={handleUpdateGlobalAtendenteRules}
             onCreateMember={async (data) => {
               const ownerUid = user?.uid || 'default';
-              await createTeamMemberRecord(ownerUid, data);
+              const newId = await createTeamMemberRecord(ownerUid, data);
               setLocalTeam((prev) => [
                 ...prev,
-                { ...data, id: `mem_${Date.now()}`, ownerId: ownerUid },
+                { ...data, id: newId || `mem_${Date.now()}`, ownerId: ownerUid },
               ]);
               await refreshNeonWorkspaceState();
-              setStatusBanner(`Usuário ${data.name} (@${data.githubHandle}) adicionado à equipe.`);
+              setStatusBanner(
+                `Usuário ${data.name} (@${data.githubHandle} · Perfil ${
+                  data.accessRole === 'admin' ? 'Admin' : 'Atendente'
+                }) cadastrado com sucesso!`
+              );
             }}
             onChangeMemberStatus={async (memberId, status) => {
               await updateTeamMemberStatus(memberId, status);
@@ -2580,6 +3020,33 @@ function ChronoDeskWorkspace() {
                 prev.map((m) => (m.id === memberId ? { ...m, status } : m))
               );
               await refreshNeonWorkspaceState();
+            }}
+            onChangeMemberPermissions={async (memberId, updates) => {
+              await updateTeamMemberPermissions(memberId, updates);
+              setLocalTeam((prev) =>
+                prev.map((m) => (m.id === memberId ? { ...m, ...updates } : m))
+              );
+              setDbTeam((prev) =>
+                prev.map((m) => (m.id === memberId ? { ...m, ...updates } : m))
+              );
+              await refreshNeonWorkspaceState();
+              setStatusBanner('Cadastro e permissões do usuário atualizados com sucesso!');
+            }}
+            onApplyProfilePermissionsToAllAtendentes={async (rules) => {
+              const atendentes = teamMembers.filter(
+                (m) => (m.accessRole || 'atendente') === 'atendente'
+              );
+              for (const at of atendentes) {
+                await updateTeamMemberPermissions(at.id, {
+                  restrictTimerToAssignedOnly: rules.restrictTimerToAssignedOnly,
+                  defaultFilterMyCardsOnLogin: rules.defaultFilterMyCardsOnLogin,
+                  allowViewAllTechniciansFilter: rules.allowViewAllTechniciansFilter,
+                });
+              }
+              await refreshNeonWorkspaceState();
+              setStatusBanner(
+                `Permissões do perfil Atendente aplicadas a ${atendentes.length} usuários!`
+              );
             }}
           />
         )}

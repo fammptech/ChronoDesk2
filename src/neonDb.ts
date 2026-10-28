@@ -33,12 +33,19 @@ export function createSafeId(prefix: string): string {
 export async function fetchNeonWorkspaceState(): Promise<NeonWorkspaceState> {
   try {
     const res = await fetch('/api/neon/state', { cache: 'no-store' });
-    if (!res.ok) {
-      throw new Error('Failed to fetch Neon state');
+    const text = await res.text();
+    if (!res.ok || !text || text.trim().startsWith('<')) {
+      return {
+        companies: [],
+        teamMembers: [],
+        tickets: [],
+        sessions: [],
+        auditLogs: [],
+        reports: [],
+      };
     }
-    return (await res.json()) as NeonWorkspaceState;
-  } catch (error) {
-    console.error('Error loading Neon workspace state:', error);
+    return JSON.parse(text) as NeonWorkspaceState;
+  } catch {
     return {
       companies: [],
       teamMembers: [],
@@ -56,13 +63,19 @@ export async function runNeonMigrations(): Promise<{ ok: boolean; message: strin
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
-    const data = await res.json();
+    const text = await res.text();
+    if (!text || text.trim().startsWith('<')) {
+      return {
+        ok: false,
+        message: 'Servidor reiniciando. Tente novamente em instantes.',
+      };
+    }
+    const data = JSON.parse(text);
     return {
       ok: Boolean(data.ok),
       message: String(data.message || 'Migrations processadas.'),
     };
-  } catch (error) {
-    console.error('Error running Neon migrations:', error);
+  } catch {
     return {
       ok: false,
       message: 'Falha ao executar migrations no endpoint /api/neon/migrate.',
@@ -103,6 +116,30 @@ export async function updateTeamMemberStatus(memberId: string, status: TeamMembe
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status }),
+  });
+}
+
+export async function updateTeamMemberPermissions(
+  memberId: string,
+  updates: {
+    name?: string;
+    email?: string;
+    password?: string;
+    roleTitle?: string;
+    githubHandle?: string;
+    specialty?: string;
+    hourlyCost?: number;
+    status?: TeamMember['status'];
+    accessRole?: TeamMember['accessRole'];
+    restrictTimerToAssignedOnly?: boolean;
+    defaultFilterMyCardsOnLogin?: boolean;
+    allowViewAllTechniciansFilter?: boolean;
+  }
+) {
+  await fetch(`/api/neon/team-members/${encodeURIComponent(memberId)}/permissions`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
   });
 }
 

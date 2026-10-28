@@ -42,14 +42,31 @@ export interface Company {
 
 export type TeamMemberStatus = 'disponivel' | 'em_atendimento' | 'ausente';
 
+export type UserAccessRole = 'admin' | 'atendente';
+
+export interface AtendentePermissionRules {
+  /** Atendente só pode iniciar o timer de um card ao qual está atribuído (Ativa / Inativa) */
+  restrictTimerToAssignedOnly: boolean;
+  /** Ao logar no sistema, o Atendente visualiza apenas os seus cards filtrados por padrão (Ativa / Inativa) */
+  defaultFilterMyCardsOnLogin: boolean;
+  /** Permite que o Atendente altere o filtro para visualizar os cards de todos os técnicos (Ativa / Inativa) */
+  allowViewAllTechniciansFilter: boolean;
+}
+
 export interface TeamMember {
   id: string;
   name: string;
+  email?: string;
+  password?: string;
   roleTitle: string;
   githubHandle: string;
   specialty: string;
   hourlyCost: number;
   status: TeamMemberStatus;
+  accessRole?: UserAccessRole;
+  restrictTimerToAssignedOnly?: boolean;
+  defaultFilterMyCardsOnLogin?: boolean;
+  allowViewAllTechniciansFilter?: boolean;
   ownerId: string;
   createdAt?: unknown;
   updatedAt?: unknown;

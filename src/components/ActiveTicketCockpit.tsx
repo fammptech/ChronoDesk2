@@ -10,10 +10,12 @@ import {
   GitBranch,
   ChevronDown,
   ChevronUp,
+  Eye,
 } from 'lucide-react';
 import { Ticket, Company, TeamMember, IssueHistoryEntry } from '../types';
 import { formatDurationHms } from '../utils/formatters';
 import { IssueCommentAndClosePanel } from './IssueCommentAndClosePanel';
+import { FormattedGitHubMarkdown } from './GitHubCardContentRenderer';
 
 interface ActiveTicketCockpitProps {
   ticket: Ticket;
@@ -37,6 +39,9 @@ interface ActiveTicketCockpitProps {
     targetStatusOptionId: string;
     targetStatusName: string;
   }) => Promise<void>;
+  canStartTimer?: boolean;
+  startTimerBlockedReason?: string;
+  onOpenCardDetail?: () => void;
 }
 
 const STATUS_LABELS: Record<Ticket['status'], string> = {
@@ -68,9 +73,13 @@ export const ActiveTicketCockpit: React.FC<ActiveTicketCockpitProps> = ({
   loadingComments,
   issueHistory,
   onConfirmCommentOrClose,
+  canStartTimer = true,
+  startTimerBlockedReason,
+  onOpenCardDetail,
 }) => {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [showCommentPanel, setShowCommentPanel] = useState<boolean>(true);
+  const [showFullBodyInCockpit, setShowFullBodyInCockpit] = useState<boolean>(false);
 
   useEffect(() => {
     if (ticket.status !== 'em_atendimento' || !ticket.activeSessionStartedAtMs) {
@@ -153,30 +162,70 @@ export const ActiveTicketCockpit: React.FC<ActiveTicketCockpitProps> = ({
               </span>
             </div>
 
-            <div className="flex items-baseline justify-between gap-4 pt-1">
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
               <h2 className="text-2xl sm:text-3xl font-bold tracking-tight font-display text-slate-900">
                 CHAMADO #{ticket.issueNumber}
               </h2>
-              {ticket.githubIssueUrl && (
-                <a
-                  href={ticket.githubIssueUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200/80 border border-slate-200 transition-colors whitespace-nowrap shrink-0"
-                >
-                  <span>Abrir Issue no GitHub</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {onOpenCardDetail && (
+                  <button
+                    type="button"
+                    onClick={onOpenCardDetail}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-2xs"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Abrir Card (Ver Conteúdo)</span>
+                  </button>
+                )}
+                {ticket.githubIssueUrl && (
+                  <a
+                    href={ticket.githubIssueUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200/80 border border-slate-200 transition-colors whitespace-nowrap shrink-0"
+                  >
+                    <span>Abrir no GitHub</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              </div>
             </div>
 
             <p className="text-base font-semibold text-slate-800 leading-snug">
               {ticket.title}
             </p>
             {ticket.description && (
-              <p className="text-sm text-slate-600 leading-relaxed line-clamp-2">
-                {ticket.description}
-              </p>
+              <div className="space-y-2">
+                {showFullBodyInCockpit ? (
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 max-h-80 overflow-y-auto">
+                    <FormattedGitHubMarkdown content={ticket.description} />
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-600 leading-relaxed line-clamp-2">
+                    {ticket.description}
+                  </p>
+                )}
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowFullBodyInCockpit((v) => !v)}
+                    className="text-xs font-semibold text-slate-700 hover:text-slate-900 underline underline-offset-2 cursor-pointer"
+                  >
+                    {showFullBodyInCockpit
+                      ? 'Recolher descrição no painel'
+                      : 'Expandir descrição aqui'}
+                  </button>
+                  {onOpenCardDetail && (
+                    <button
+                      type="button"
+                      onClick={onOpenCardDetail}
+                      className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 underline underline-offset-2 cursor-pointer"
+                    >
+                      Abrir visualização completa do card →
+                    </button>
+                  )}
+                </div>
+              </div>
             )}
           </div>
 
@@ -292,12 +341,22 @@ export const ActiveTicketCockpit: React.FC<ActiveTicketCockpitProps> = ({
                 ) : (
                   <button
                     type="button"
-                    disabled={busyAction}
+                    disabled={busyAction || !canStartTimer}
                     onClick={() => onStartOrResume(ticket)}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    title={
+                      !canStartTimer
+                        ? startTimerBlockedReason ||
+                          'Apenas o atendente atribuído a este card ou um Admin pode iniciar o cronômetro.'
+                        : 'Iniciar contagem do tempo de atendimento'
+                    }
+                    className={`inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 ${
+                      !canStartTimer
+                        ? 'bg-slate-200 text-slate-500 border border-slate-300 cursor-not-allowed'
+                        : 'text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 cursor-pointer'
+                    }`}
                   >
                     <Play className="w-4 h-4" />
-                    <span>Iniciar Contagem</span>
+                    <span>{!canStartTimer ? 'Timer Bloqueado (Não Atribuído)' : 'Iniciar Contagem'}</span>
                   </button>
                 )}
 
@@ -322,6 +381,12 @@ export const ActiveTicketCockpit: React.FC<ActiveTicketCockpitProps> = ({
                 <RotateCcw className="w-4 h-4" />
                 <span>Reabrir Chamado #{ticket.issueNumber}</span>
               </button>
+            )}
+
+            {!canStartTimer && startTimerBlockedReason && ticket.status !== 'encerrado' && (
+              <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-300 text-[11px] text-amber-950 font-medium">
+                {startTimerBlockedReason}
+              </div>
             )}
 
             {/* GitHub Comments Inspector & Toggle */}

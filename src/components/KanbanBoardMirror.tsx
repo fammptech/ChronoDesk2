@@ -14,6 +14,7 @@ import {
   GitFork,
   Calendar,
   AlertTriangle,
+  Eye,
 } from 'lucide-react';
 import {
   PROJECT_STATUS_COLUMNS,
@@ -31,6 +32,7 @@ import {
 import { Ticket, IssueHistoryEntry } from '../types';
 import { formatDurationHms } from '../utils/formatters';
 import { IssueCommentAndClosePanel } from './IssueCommentAndClosePanel';
+import { GitHubCardContentRenderer } from './GitHubCardContentRenderer';
 import {
   Select,
   SelectContent,
@@ -122,6 +124,13 @@ interface KanbanBoardMirrorProps {
       targetStatusName: string;
     }
   ) => Promise<void>;
+  externalAssigneeFilter?: string;
+  onChangeExternalAssigneeFilter?: (val: string) => void;
+  canViewAllTechnicians?: boolean;
+  currentOperatorHandle?: string;
+  canStartTimerOnCard?: (card: MirroredBoardCard) => { allowed: boolean; reason?: string };
+  externalOpenIssueNumber?: number | null;
+  onClearExternalOpenIssue?: () => void;
 }
 
 export const KanbanBoardMirror: React.FC<KanbanBoardMirrorProps> = ({
@@ -145,11 +154,25 @@ export const KanbanBoardMirror: React.FC<KanbanBoardMirrorProps> = ({
   onCreateFullCardOnGitHub,
   issueHistoryByNumber,
   onConfirmCommentOrCloseCard,
+  externalAssigneeFilter,
+  onChangeExternalAssigneeFilter,
+  canViewAllTechnicians = true,
+  currentOperatorHandle,
+  canStartTimerOnCard,
+  externalOpenIssueNumber,
+  onClearExternalOpenIssue,
 }) => {
   // Board-level Filters matching exact GitHub Project fields
   const [filterCliente, setFilterCliente] = useState<string>('ALL');
   const [filterEsteira, setFilterEsteira] = useState<string>('ALL');
-  const [filterAssignee, setFilterAssignee] = useState<string>('ALL');
+  const [internalFilterAssignee, setInternalFilterAssignee] = useState<string>('ALL');
+  const filterAssignee = externalAssigneeFilter ?? internalFilterAssignee;
+  const setFilterAssignee = (val: string) => {
+    setInternalFilterAssignee(val);
+    if (onChangeExternalAssigneeFilter) {
+      onChangeExternalAssigneeFilter(val);
+    }
+  };
   const [filterLabel, setFilterLabel] = useState<string>('ALL');
   const [hideEmptyColumns, setHideEmptyColumns] = useState<boolean>(false);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
@@ -169,8 +192,9 @@ export const KanbanBoardMirror: React.FC<KanbanBoardMirrorProps> = ({
     return () => window.clearInterval(interval);
   }, [hasAnyRunningTimer]);
 
-  // Full Card Editor Modal State
+  // Full Card Viewer / Editor Modal State
   const [editingCard, setEditingCard] = useState<MirroredBoardCard | null>(null);
+  const [cardModalMode, setCardModalMode] = useState<'view' | 'edit'>('view');
   const [editTitle, setEditTitle] = useState('');
   const [editBody, setEditBody] = useState('');
   const [editState, setEditState] = useState<'OPEN' | 'CLOSED'>('OPEN');
@@ -222,13 +246,14 @@ export const KanbanBoardMirror: React.FC<KanbanBoardMirrorProps> = ({
     });
   }, [cards, filterCliente, filterEsteira, filterAssignee, filterLabel]);
 
-  const openEditModal = (card: MirroredBoardCard) => {
+  const openEditModal = (card: MirroredBoardCard, mode: 'view' | 'edit' = 'view') => {
     onSelectCard(card);
     const linkedTicket = ticketsByIssueNumber[card.issueNumber];
     const workedHours = linkedTicket
       ? Number((linkedTicket.totalSecondsWorked / 3600).toFixed(4))
       : card.horasGastas;
 
+    setCardModalMode(mode);
     setEditingCard(card);
     setEditTitle(card.title);
     setEditBody(card.body);
@@ -278,6 +303,18 @@ export const KanbanBoardMirror: React.FC<KanbanBoardMirrorProps> = ({
     setEditPrioridadesSemanal(card.prioridadesSemanal || '');
     setEditComment('');
   };
+
+  useEffect(() => {
+    if (externalOpenIssueNumber && externalOpenIssueNumber > 0) {
+      const targetCard = cards.find((c) => c.issueNumber === externalOpenIssueNumber);
+      if (targetCard) {
+        openEditModal(targetCard, 'view');
+      }
+      if (onClearExternalOpenIssue) {
+        onClearExternalOpenIssue();
+      }
+    }
+  }, [externalOpenIssueNumber, cards]);
 
   const handleSaveEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -390,18 +427,40 @@ export const KanbanBoardMirror: React.FC<KanbanBoardMirrorProps> = ({
             </Select>
           </div>
 
-          <div className="w-60">
-            <Select value={filterAssignee} onValueChange={setFilterAssignee}>
-              <SelectTrigger className="bg-slate-50">
+          <div className="w-64">
+            <Select
+              value={filterAssignee}
+              onValueChange={(val) => {
+                if (!canViewAllTechnicians && currentOperatorHandle) {
+                  setFilterAssignee(currentOperatorHandle);
+                  return;
+                }
+                setFilterAssignee(val);
+              }}
+              disabled={!canViewAllTechnicians}
+            >
+              <SelectTrigger
+                className="bg-slate-50"
+                title={
+                  !canViewAllTechnicians
+                    ? 'Permissão para filtrar outros técnicos está inativa para Atendentes (configurável pelo Admin)'
+                    : 'Filtrar cards por técnico atribuído'
+                }
+              >
                 <SelectValue placeholder="Usuário GitHub" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">
-                  Usuário GitHub: Todos ({PROJECT_ZDT_USERS.length})
-                </SelectItem>
+                {canViewAllTechnicians && (
+                  <SelectItem value="ALL">
+                    Todos os Técnicos ({PROJECT_ZDT_USERS.length})
+                  </SelectItem>
+                )}
                 {PROJECT_ZDT_USERS.map((u) => (
                   <SelectItem key={u.login} value={u.login}>
-                    @{u.login} — {u.name}
+                    {currentOperatorHandle &&
+                    u.login.toLowerCase() === currentOperatorHandle.toLowerCase()
+                      ? `Meus Cards: @${u.login} (${u.name})`
+                      : `@${u.login} — ${u.name}`}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -534,7 +593,7 @@ export const KanbanBoardMirror: React.FC<KanbanBoardMirrorProps> = ({
                     return (
                       <article
                         key={`${card.itemId || card.contentId}_${card.issueNumber}`}
-                        onClick={() => onSelectCard(card)}
+                        onClick={() => openEditModal(card, 'view')}
                         className={`bg-white rounded-lg p-3.5 border transition-all cursor-pointer space-y-2.5 ${
                           isFocused
                             ? 'border-slate-900 ring-1 ring-slate-900 shadow-xs'
@@ -573,22 +632,36 @@ export const KanbanBoardMirror: React.FC<KanbanBoardMirrorProps> = ({
                             )}
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEditModal(card);
-                            }}
-                            className="p-1 text-slate-400 hover:text-slate-900 rounded cursor-pointer shrink-0"
-                            title="Editar todos os campos do Card e sincronizar com o GitHub"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEditModal(card, 'view');
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded cursor-pointer"
+                              title="Abrir card para visualizar todo o conteúdo do GitHub"
+                            >
+                              <Eye className="w-3 h-3" />
+                              <span>Abrir</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEditModal(card, 'edit');
+                              }}
+                              className="p-1 text-slate-400 hover:text-slate-900 rounded cursor-pointer"
+                              title="Editar campos do Card e sincronizar com o GitHub"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
 
                         {/* Title */}
                         <div>
-                          <h4 className="text-sm font-semibold text-slate-900 leading-snug">
+                          <h4 className="text-sm font-semibold text-slate-900 leading-snug hover:underline">
                             {card.title}
                           </h4>
                           {card.body && (
@@ -693,19 +766,34 @@ export const KanbanBoardMirror: React.FC<KanbanBoardMirrorProps> = ({
                                     <Pause className="w-3 h-3" />
                                     <span>Pausar</span>
                                   </button>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    disabled={busyAction}
-                                    onClick={() => {
-                                      onStartOrResumeCard(card);
-                                    }}
-                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded cursor-pointer whitespace-nowrap shrink-0"
-                                  >
-                                    <Play className="w-3 h-3" />
-                                    <span>Atender</span>
-                                  </button>
-                                ))}
+                                ) : (() => {
+                                  const perm = canStartTimerOnCard
+                                    ? canStartTimerOnCard(card)
+                                    : { allowed: true };
+                                  return (
+                                    <button
+                                      type="button"
+                                      disabled={busyAction || !perm.allowed}
+                                      onClick={() => {
+                                        onStartOrResumeCard(card);
+                                      }}
+                                      title={
+                                        !perm.allowed
+                                          ? perm.reason ||
+                                            'Apenas o técnico atribuído a este card ou um Admin pode iniciar o cronômetro'
+                                          : 'Iniciar cronômetro neste card'
+                                      }
+                                      className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded whitespace-nowrap shrink-0 ${
+                                        !perm.allowed
+                                          ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                                          : 'text-white bg-emerald-600 hover:bg-emerald-500 cursor-pointer'
+                                      }`}
+                                    >
+                                      <Play className="w-3 h-3" />
+                                      <span>{!perm.allowed ? 'Bloqueado' : 'Atender'}</span>
+                                    </button>
+                                  );
+                                })())}
 
                               {card.statusColumn !== 'Concluído' && (
                                 <button
@@ -786,32 +874,418 @@ export const KanbanBoardMirror: React.FC<KanbanBoardMirrorProps> = ({
         </div>
       </div>
 
-      {/* Full Bidirectional Card Edit Modal with ALL GitHub Project #3 / #4 Custom Fields */}
-      {editingCard && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-xl w-full max-w-3xl overflow-hidden shadow-xl my-8">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 font-display">
-                  Editar Card #{editingCard.issueNumber} — Sincronização Bidirecional GitHub Project
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Atualiza simultaneamente o repositório ({editingCard.repository}), o Project #3 (@felipeolio) e o Governança ZDT.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingCard(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-700 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Full GitHub Card Viewer & Bidirectional Editor Modal */}
+      {editingCard && (() => {
+        const modalLinkedTicket = ticketsByIssueNumber[editingCard.issueNumber];
+        const modalIsRunning =
+          modalLinkedTicket?.status === 'em_atendimento' &&
+          (modalLinkedTicket.activeSessionStartedAtMs || 0) > 0;
+        const modalCurrentRunSecs = modalIsRunning
+          ? Math.max(0, Math.floor((nowMs - modalLinkedTicket.activeSessionStartedAtMs) / 1000))
+          : 0;
+        const modalBaseSecs = modalLinkedTicket
+          ? modalLinkedTicket.totalSecondsWorked
+          : Math.round((editingCard.horasGastas || 0) * 3600);
+        const modalTotalSecs = modalBaseSecs + modalCurrentRunSecs;
+        const modalPerm = canStartTimerOnCard
+          ? canStartTimerOnCard(editingCard)
+          : { allowed: true };
 
-            <form
-              onSubmit={handleSaveEditSubmit}
-              className="p-6 space-y-4 max-h-[80vh] overflow-y-auto"
-            >
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 overflow-y-auto">
+            <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-5xl overflow-hidden shadow-2xl my-6">
+              {/* Top Modal Header with View / Edit Mode Switcher */}
+              <div className="px-6 py-4 border-b border-slate-200 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-mono font-bold px-2 py-0.5 rounded bg-white/15 text-white">
+                      #{editingCard.issueNumber}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded font-semibold ${
+                        editingCard.state === 'CLOSED' ||
+                        editingCard.statusColumn === 'Concluído'
+                          ? 'bg-purple-500/30 text-purple-200 border border-purple-400/30'
+                          : 'bg-emerald-500/30 text-emerald-200 border border-emerald-400/30'
+                      }`}
+                    >
+                      {editingCard.state === 'CLOSED' ||
+                      editingCard.statusColumn === 'Concluído'
+                        ? 'CONCLUÍDO / CLOSED'
+                        : 'ABERTO / OPEN'}
+                    </span>
+                    <span className="text-slate-300 font-mono">
+                      {editingCard.repository || 'zdttech-copilot/governanca-zdt'}
+                    </span>
+                    {editingCard.url && (
+                      <a
+                        href={editingCard.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-emerald-300 hover:text-emerald-200 underline underline-offset-2 font-medium"
+                      >
+                        <span>Abrir no GitHub</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                  <h3 className="text-lg font-bold text-white font-display leading-snug">
+                    {editingCard.title}
+                  </h3>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+                  <div className="inline-flex items-center bg-white/10 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setCardModalMode('view')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                        cardModalMode === 'view'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-200 hover:text-white'
+                      }`}
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Conteúdo do Card</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCardModalMode('edit')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                        cardModalMode === 'edit'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-200 hover:text-white'
+                      }`}
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Editar Campos</span>
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setEditingCard(null)}
+                    className="p-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer"
+                    title="Fechar card"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {cardModalMode === 'view' ? (
+                /* =====================================================================
+                   MODE 1: GITHUB CARD CONTENT VIEWER (2-COLUMN LAYOUT)
+                   ===================================================================== */
+                <div className="p-6 max-h-[82vh] overflow-y-auto bg-slate-50/60">
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                    {/* Left 8 Columns: Full GitHub Issue Content + Comments + Comment/Close Box */}
+                    <div className="lg:col-span-8 space-y-5">
+                      <GitHubCardContentRenderer
+                        repo={editingCard.repository || 'zdttech-copilot/governanca-zdt'}
+                        issueNumber={editingCard.issueNumber}
+                        fallbackBody={editBody || editingCard.body}
+                        fallbackAuthor={editingCard.assignees[0] || 'felipeolio'}
+                        fallbackUpdatedAt={editingCard.updatedAt}
+                        issueUrl={editingCard.url}
+                        onEditClick={() => setCardModalMode('edit')}
+                      />
+
+                      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
+                        <IssueCommentAndClosePanel
+                          issueNumber={editingCard.issueNumber}
+                          issueTitle={editingCard.title}
+                          currentColumnName={editingCard.statusColumn}
+                          currentAuthorName={
+                            PROJECT_ZDT_USERS.find(
+                              (u) => u.login === (editingCard.assignees[0] || 'felipeolio')
+                            )?.name || 'Felipe Olio'
+                          }
+                          currentAuthorHandle={editingCard.assignees[0] || 'felipeolio'}
+                          busyAction={busyAction}
+                          historyEntries={issueHistoryByNumber[editingCard.issueNumber] || []}
+                          onConfirmCommentOrClose={async (params) => {
+                            await onConfirmCommentOrCloseCard(editingCard, params);
+                            setEditingCard((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    statusOptionId: params.targetStatusOptionId,
+                                    statusColumn: params.targetStatusName,
+                                    state:
+                                      params.actionType === 'close_issue' ||
+                                      params.targetStatusName === 'Concluído'
+                                        ? 'CLOSED'
+                                        : 'OPEN',
+                                  }
+                                : null
+                            );
+                          }}
+                          variant="modal"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Right 4 Columns: Timer + Status Column + All GitHub Project Custom Fields */}
+                    <div className="lg:col-span-4 space-y-4">
+                      {/* Timer Box inside Card */}
+                      <div
+                        className={`p-4 rounded-xl border space-y-3 ${
+                          modalIsRunning
+                            ? 'bg-emerald-50 border-emerald-300'
+                            : 'bg-white border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold uppercase tracking-wider text-slate-500">
+                            Cronômetro do Card
+                          </span>
+                          <span
+                            className={`font-semibold ${
+                              modalIsRunning ? 'text-emerald-700' : 'text-slate-600'
+                            }`}
+                          >
+                            {modalIsRunning ? '● Em Atendimento' : 'Pausado / Pronto'}
+                          </span>
+                        </div>
+
+                        <div className="text-2xl font-bold font-mono tabular-nums text-slate-900">
+                          ⏱ {formatDurationHms(modalTotalSecs)}
+                        </div>
+
+                        {editingCard.statusColumn !== 'Concluído' && (
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            {modalIsRunning ? (
+                              <button
+                                type="button"
+                                disabled={busyAction}
+                                onClick={() => onPauseCard(editingCard, modalCurrentRunSecs)}
+                                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-900 bg-amber-300 hover:bg-amber-400 rounded-lg cursor-pointer"
+                              >
+                                <Pause className="w-3.5 h-3.5" />
+                                <span>Pausar Timer</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={busyAction || !modalPerm.allowed}
+                                onClick={() => onStartOrResumeCard(editingCard)}
+                                title={
+                                  !modalPerm.allowed
+                                    ? modalPerm.reason
+                                    : 'Iniciar cronômetro de atendimento neste card'
+                                }
+                                className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg ${
+                                  !modalPerm.allowed
+                                    ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                                    : 'text-white bg-emerald-600 hover:bg-emerald-500 cursor-pointer'
+                                }`}
+                              >
+                                <Play className="w-3.5 h-3.5" />
+                                <span>
+                                  {!modalPerm.allowed ? 'Timer Bloqueado' : 'Iniciar / Atender'}
+                                </span>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              disabled={busyAction}
+                              onClick={() => onCloseCard(editingCard, modalCurrentRunSecs)}
+                              className="inline-flex items-center justify-center gap-1 px-3 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg cursor-pointer"
+                              title="Encerrar apenas o timer de atendimento"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Encerrar</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Quick Column Change */}
+                      <div className="p-4 rounded-xl bg-white border border-slate-200 space-y-2">
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                          Coluna no GitHub Project (Status)
+                        </div>
+                        <Select
+                          value={
+                            editingCard.statusOptionId ||
+                            PROJECT_STATUS_COLUMNS.find(
+                              (c) => c.name === editingCard.statusColumn
+                            )?.id ||
+                            PROJECT_STATUS_COLUMNS[0].id
+                          }
+                          disabled={busyAction}
+                          onValueChange={async (val) => {
+                            const targetCol = PROJECT_STATUS_COLUMNS.find((c) => c.id === val);
+                            if (targetCol) {
+                              await onMoveCardToStatusColumn(
+                                editingCard,
+                                targetCol.id,
+                                targetCol.name
+                              );
+                              setEditingCard((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      statusOptionId: targetCol.id,
+                                      statusColumn: targetCol.name,
+                                    }
+                                  : null
+                              );
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="w-full bg-slate-50">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PROJECT_STATUS_COLUMNS.map((sc) => (
+                              <SelectItem key={sc.id} value={sc.id}>
+                                {sc.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* All GitHub Project Fields Summary */}
+                      <div className="p-4 rounded-xl bg-white border border-slate-200 space-y-3 text-xs">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                          <span className="font-bold uppercase tracking-wider text-slate-500">
+                            Campos do GitHub Project
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setCardModalMode('edit')}
+                            className="text-slate-900 font-semibold hover:underline cursor-pointer"
+                          >
+                            Editar
+                          </button>
+                        </div>
+
+                        <div className="space-y-2.5 divide-y divide-slate-100">
+                          <div className="pt-1 flex items-center justify-between gap-2">
+                            <span className="text-slate-500">Cliente:</span>
+                            <span className="font-bold text-slate-900">
+                              {editingCard.cliente || 'Não definido'}
+                            </span>
+                          </div>
+
+                          <div className="pt-2 flex items-start justify-between gap-2">
+                            <span className="text-slate-500">Assignees:</span>
+                            <span className="font-mono font-semibold text-slate-900 text-right">
+                              {editingCard.assignees.length > 0
+                                ? editingCard.assignees.map((a) => `@${a}`).join(', ')
+                                : '@felipeolio'}
+                            </span>
+                          </div>
+
+                          <div className="pt-2 flex items-center justify-between gap-2">
+                            <span className="text-slate-500">Esteira:</span>
+                            <span className="font-medium text-slate-900 text-right">
+                              {editingCard.esteira || 'Não definida'}
+                            </span>
+                          </div>
+
+                          <div className="pt-2 flex items-center justify-between gap-2">
+                            <span className="text-slate-500">Tipo de Demanda:</span>
+                            <span className="font-medium text-slate-900 text-right">
+                              {editingCard.tipoDemanda || 'Não classificado'}
+                            </span>
+                          </div>
+
+                          <div className="pt-2 flex items-center justify-between gap-2">
+                            <span className="text-slate-500">Prioridade:</span>
+                            <span className="font-bold text-slate-900">
+                              {editingCard.priority || 'Padrão'}
+                            </span>
+                          </div>
+
+                          <div className="pt-2 flex items-center justify-between gap-2">
+                            <span className="text-slate-500">Impedimento:</span>
+                            <span
+                              className={
+                                editingCard.impedimento
+                                  ? 'font-bold text-rose-700'
+                                  : 'text-slate-400'
+                              }
+                            >
+                              {editingCard.impedimento || 'Nenhum'}
+                            </span>
+                          </div>
+
+                          <div className="pt-2 flex items-center justify-between gap-2">
+                            <span className="text-slate-500">Size / Effort:</span>
+                            <span className="font-mono font-semibold text-slate-800">
+                              {editingCard.size || '-'} / {editingCard.effort || '-'}
+                            </span>
+                          </div>
+
+                          <div className="pt-2 flex items-center justify-between gap-2">
+                            <span className="text-slate-500">Horas Gastas / Estimate:</span>
+                            <span className="font-mono font-semibold text-slate-900">
+                              {editingCard.horasGastas || 0}h / {editingCard.estimate || 0}h
+                            </span>
+                          </div>
+
+                          {editingCard.terminoPlanejado && (
+                            <div className="pt-2 flex items-center justify-between gap-2">
+                              <span className="text-slate-500">Término Planejado:</span>
+                              <span className="font-mono text-slate-900">
+                                {editingCard.terminoPlanejado}
+                              </span>
+                            </div>
+                          )}
+
+                          {editingCard.proximoFollowUp && (
+                            <div className="pt-2 flex items-center justify-between gap-2">
+                              <span className="text-slate-500">Próximo Follow-up:</span>
+                              <span className="font-mono text-slate-900">
+                                {editingCard.proximoFollowUp}
+                              </span>
+                            </div>
+                          )}
+
+                          {editingCard.prioridadesSemanal && (
+                            <div className="pt-2 flex items-center justify-between gap-2">
+                              <span className="text-slate-500">Prioridade Semanal:</span>
+                              <span className="font-medium text-slate-900">
+                                {editingCard.prioridadesSemanal}
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="pt-2 space-y-1.5">
+                            <div className="text-slate-500">Tags / Labels do GitHub:</div>
+                            {editingCard.labels.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {editingCard.labels.map((lbl) => (
+                                  <span
+                                    key={lbl}
+                                    className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-800 font-mono text-[11px]"
+                                  >
+                                    {lbl}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-slate-400">Sem labels</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* =====================================================================
+                   MODE 2: FULL BIDIRECTIONAL CARD FIELDS EDITOR
+                   ===================================================================== */
+                <form
+                  onSubmit={handleSaveEditSubmit}
+                  className="p-6 space-y-4 max-h-[80vh] overflow-y-auto"
+                >
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Título do Chamado / Issue
@@ -1183,9 +1657,11 @@ export const KanbanBoardMirror: React.FC<KanbanBoardMirrorProps> = ({
                 />
               </div>
             </form>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Create New Card Modal with Full Custom Fields */}
       {creatingInStatusOptionId && (

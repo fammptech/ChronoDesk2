@@ -96,11 +96,16 @@ function getDefaultNeonStoreData(): NeonLocalStoreData {
     teamMembers: PROJECT_ZDT_USERS.slice(0, 9).map((u, idx) => ({
       id: `mem_${u.login}`,
       name: u.name,
+      email: idx === 0 ? 'fammp.tech@gmail.com' : `${u.login.toLowerCase()}@zdt.com.br`,
       roleTitle: idx === 0 ? 'Gestão / Governança ZDT' : 'Especialista Sustentação & Projetos ZDT',
       githubHandle: u.login,
       specialty: 'N1 / Atendimento / Sustentação / Desenvolvimento',
       hourlyCost: 160,
       status: idx === 0 ? 'em_atendimento' : 'disponivel',
+      accessRole: idx === 0 ? 'admin' : 'atendente',
+      restrictTimerToAssignedOnly: true,
+      defaultFilterMyCardsOnLogin: true,
+      allowViewAllTechniciansFilter: true,
       ownerId: 'default',
     })),
     tickets: [],
@@ -201,7 +206,14 @@ async function runGitHubGraphQL(
     },
     body: JSON.stringify({ query, variables }),
   });
-  return response.json() as Promise<Record<string, any>>;
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as Record<string, any>;
+  } catch {
+    return {
+      errors: [{ message: `GitHub API returned non-JSON status ${response.status}` }],
+    };
+  }
 }
 
 function parseFieldValuesIntoCard(
@@ -1268,7 +1280,7 @@ async function startServer() {
     }
   });
 
-  // 5. Fetch real comments for a specific GitHub Issue
+  // 5. Fetch real comments and full issue content for a specific GitHub Issue
   app.get('/api/github/comments', async (req, res) => {
     const repo = String(req.query.repo || 'zdttech-copilot/governanca-zdt').trim();
     const issueNumber = Number(req.query.issueNumber);
@@ -1279,25 +1291,52 @@ async function startServer() {
     }
 
     try {
-      const apiUrl = `https://api.github.com/repos/${repo}/issues/${issueNumber}/comments?per_page=15`;
-      const response = await fetch(apiUrl, { headers: buildGitHubHeaders() });
+      const [issueRes, commentsRes] = await Promise.all([
+        fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}`, {
+          headers: buildGitHubHeaders(),
+        }),
+        fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}/comments?per_page=50`, {
+          headers: buildGitHubHeaders(),
+        }),
+      ]);
 
-      if (!response.ok) {
-        res.status(response.status).json({
-          error: `Falha ao buscar comentários (${response.status})`,
+      let issueDetails: Record<string, any> | null = null;
+      if (issueRes.ok) {
+        const rawIssue = (await issueRes.json()) as Record<string, any>;
+        issueDetails = {
+          number: Number(rawIssue.number || issueNumber),
+          title: String(rawIssue.title || ''),
+          body: String(rawIssue.body || ''),
+          state: String(rawIssue.state || 'open'),
+          author: String(rawIssue.user?.login || 'github-user'),
+          authorAvatar: String(rawIssue.user?.avatar_url || ''),
+          createdAt: String(rawIssue.created_at || ''),
+          updatedAt: String(rawIssue.updated_at || ''),
+          htmlUrl: String(rawIssue.html_url || ''),
+          commentsCount: Number(rawIssue.comments || 0),
+        };
+      }
+
+      if (!commentsRes.ok) {
+        res.status(commentsRes.status).json({
+          error: `Falha ao buscar comentários (${commentsRes.status})`,
+          issue: issueDetails,
+          comments: [],
         });
         return;
       }
 
-      const comments = (await response.json()) as Array<Record<string, any>>;
+      const comments = (await commentsRes.json()) as Array<Record<string, any>>;
       const formatted = comments.map((c) => ({
         id: String(c.id),
         author: String(c.user?.login || 'github-user'),
+        authorAvatar: String(c.user?.avatar_url || ''),
         createdAt: String(c.created_at || new Date().toISOString()),
-        body: String(c.body || '').slice(0, 800),
+        body: String(c.body || ''),
+        htmlUrl: String(c.html_url || ''),
       }));
 
-      res.json({ repo, issueNumber, comments: formatted });
+      res.json({ repo, issueNumber, issue: issueDetails, comments: formatted });
     } catch (error) {
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Erro ao buscar comentários do GitHub',
@@ -1402,6 +1441,105 @@ async function startServer() {
   // ===========================================================================
   // 9. Neon.com PostgreSQL Database Endpoints (/api/neon/*)
   // ===========================================================================
+  app.get('/api/neon/health', async (_req, res) => {
+    const connStr = (process.env.NEON_DATABASE_URL || '').trim();
+    if (!connStr) {
+      res.json({
+        connected: false,
+        configured: false,
+        host: null,
+        database: null,
+        latencyMs: 0,
+        tables: [],
+        counts: {
+          companies: neonStore.companies.length,
+          teamMembers: neonStore.teamMembers.length,
+          tickets: neonStore.tickets.length,
+          sessions: neonStore.sessions.length,
+          auditLogs: neonStore.auditLogs.length,
+        },
+        message:
+          'Variável NEON_DATABASE_URL ainda não definida no ambiente. Usando store local (.neon-local-store.json) até que a Connection String seja adicionada.',
+      });
+      return;
+    }
+
+    const startMs = Date.now();
+    let parsedHost = '';
+    try {
+      parsedHost = new URL(connStr).hostname;
+    } catch {
+      parsedHost = 'host-invalido';
+    }
+
+    try {
+      const pingRows = await executeNeonSql(
+        `SELECT current_database() AS db_name, current_user AS db_user, version() AS pg_version`
+      );
+      const latencyMs = Date.now() - startMs;
+
+      if (!pingRows || pingRows.length === 0) {
+        res.json({
+          connected: false,
+          configured: true,
+          host: parsedHost,
+          database: null,
+          latencyMs,
+          tables: [],
+          counts: {},
+          message:
+            'NEON_DATABASE_URL encontrada, mas não foi possível autenticar via HTTP SQL no endpoint do Neon. Verifique se a URL está completa com ?sslmode=require.',
+        });
+        return;
+      }
+
+      const tableRows = await executeNeonSql(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name ASC`
+      );
+      const tables = (tableRows || []).map((r) => String(r.table_name));
+
+      const countCompanies = await executeNeonSql(`SELECT COUNT(*)::int AS total FROM companies`);
+      const countTeam = await executeNeonSql(`SELECT COUNT(*)::int AS total FROM team_members`);
+      const countTickets = await executeNeonSql(`SELECT COUNT(*)::int AS total FROM tickets`);
+      const countSessions = await executeNeonSql(
+        `SELECT COUNT(*)::int AS total FROM attendance_sessions`
+      );
+      const countLogs = await executeNeonSql(`SELECT COUNT(*)::int AS total FROM audit_logs`);
+
+      res.json({
+        connected: true,
+        configured: true,
+        host: parsedHost,
+        database: String(pingRows[0].db_name || 'neondb'),
+        dbUser: String(pingRows[0].db_user || 'neondb_owner'),
+        latencyMs,
+        tables,
+        counts: {
+          companies: Number(countCompanies?.[0]?.total ?? 0),
+          teamMembers: Number(countTeam?.[0]?.total ?? 0),
+          tickets: Number(countTickets?.[0]?.total ?? 0),
+          sessions: Number(countSessions?.[0]?.total ?? 0),
+          auditLogs: Number(countLogs?.[0]?.total ?? 0),
+        },
+        message: `Conectado com sucesso ao Neon.com (${parsedHost}) em ${latencyMs}ms!`,
+      });
+    } catch (err) {
+      res.json({
+        connected: false,
+        configured: true,
+        host: parsedHost,
+        database: null,
+        latencyMs: Date.now() - startMs,
+        tables: [],
+        counts: {},
+        message:
+          err instanceof Error
+            ? `Erro ao testar conexão com Neon: ${err.message}`
+            : 'Erro ao testar conexão com Neon.',
+      });
+    }
+  });
+
   app.get('/api/neon/state', async (_req, res) => {
     try {
       const dbCompanies = await executeNeonSql(
@@ -1456,6 +1594,7 @@ async function startServer() {
       );
 
       res.json({
+        neonConfigured: Boolean((process.env.NEON_DATABASE_URL || '').trim()),
         companies: dbCompanies && dbCompanies.length > 0 ? dbCompanies : neonStore.companies,
         teamMembers: dbTeam && dbTeam.length > 0 ? dbTeam : neonStore.teamMembers,
         tickets: dbTickets
@@ -1480,9 +1619,11 @@ async function startServer() {
             }))
           : neonStore.reports,
       });
-    } catch (error) {
-      console.error('Failed to read Neon state:', error);
-      res.json(neonStore);
+    } catch {
+      res.json({
+        neonConfigured: Boolean((process.env.NEON_DATABASE_URL || '').trim()),
+        ...neonStore,
+      });
     }
   });
 
@@ -1554,27 +1695,46 @@ async function startServer() {
   });
 
   app.post('/api/neon/team-members', async (req, res) => {
+    const githubHandle = String(req.body.githubHandle || 'dev').trim().replace(/^@/, '');
+    const accessRole = req.body.accessRole === 'admin' ? 'admin' : 'atendente';
     const item = {
-      id: String(req.body.id || `mem_${Date.now()}`),
+      id: String(req.body.id || `mem_${githubHandle}_${Date.now()}`),
       name: String(req.body.name || 'Especialista'),
+      email: String(req.body.email || `${githubHandle.toLowerCase()}@zdt.com.br`),
       roleTitle: String(req.body.roleTitle || 'Engenheiro de Suporte'),
-      githubHandle: String(req.body.githubHandle || 'dev'),
+      githubHandle,
       specialty: String(req.body.specialty || 'Full-Stack'),
       hourlyCost: Number(req.body.hourlyCost) || 160,
       status: req.body.status || 'disponivel',
+      accessRole,
+      restrictTimerToAssignedOnly:
+        typeof req.body.restrictTimerToAssignedOnly === 'boolean'
+          ? req.body.restrictTimerToAssignedOnly
+          : true,
+      defaultFilterMyCardsOnLogin:
+        typeof req.body.defaultFilterMyCardsOnLogin === 'boolean'
+          ? req.body.defaultFilterMyCardsOnLogin
+          : true,
+      allowViewAllTechniciansFilter:
+        typeof req.body.allowViewAllTechniciansFilter === 'boolean'
+          ? req.body.allowViewAllTechniciansFilter
+          : true,
       ownerId: String(req.body.ownerId || 'default'),
     };
     neonStore.teamMembers = [
-      ...neonStore.teamMembers.filter((m) => m.id !== item.id),
+      ...neonStore.teamMembers.filter(
+        (m) => m.id !== item.id && m.githubHandle.toLowerCase() !== item.githubHandle.toLowerCase()
+      ),
       item,
     ];
     saveNeonStore();
     await executeNeonSql(
       `INSERT INTO team_members (id, name, role_title, github_handle, specialty, hourly_cost, status, owner_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (github_handle) DO UPDATE SET
+       ON CONFLICT (id) DO UPDATE SET
          name = EXCLUDED.name,
          role_title = EXCLUDED.role_title,
+         github_handle = EXCLUDED.github_handle,
          specialty = EXCLUDED.specialty,
          hourly_cost = EXCLUDED.hourly_cost,
          status = EXCLUDED.status`,
@@ -1604,6 +1764,70 @@ async function startServer() {
       memberId,
     ]);
     res.json({ ok: true });
+  });
+
+  app.patch('/api/neon/team-members/:id/permissions', async (req, res) => {
+    const memberId = String(req.params.id);
+    const u = req.body || {};
+    let updatedMember: any = null;
+    neonStore.teamMembers = neonStore.teamMembers.map((m) => {
+      if (m.id !== memberId) return m;
+      const next = {
+        ...m,
+        name: typeof u.name === 'string' && u.name.trim() ? u.name.trim() : m.name,
+        email: typeof u.email === 'string' && u.email.trim() ? u.email.trim() : m.email,
+        password:
+          typeof u.password === 'string' && u.password.trim()
+            ? u.password.trim()
+            : m.password || '123456',
+        roleTitle:
+          typeof u.roleTitle === 'string' && u.roleTitle.trim() ? u.roleTitle.trim() : m.roleTitle,
+        githubHandle:
+          typeof u.githubHandle === 'string' && u.githubHandle.trim()
+            ? u.githubHandle.trim().replace(/^@/, '')
+            : m.githubHandle,
+        specialty:
+          typeof u.specialty === 'string' && u.specialty.trim() ? u.specialty.trim() : m.specialty,
+        hourlyCost:
+          typeof u.hourlyCost === 'number' && !Number.isNaN(u.hourlyCost)
+            ? u.hourlyCost
+            : m.hourlyCost,
+        status: typeof u.status === 'string' ? u.status : m.status,
+        accessRole: u.accessRole ?? m.accessRole ?? 'atendente',
+        restrictTimerToAssignedOnly:
+          typeof u.restrictTimerToAssignedOnly === 'boolean'
+            ? u.restrictTimerToAssignedOnly
+            : (m.restrictTimerToAssignedOnly ?? true),
+        defaultFilterMyCardsOnLogin:
+          typeof u.defaultFilterMyCardsOnLogin === 'boolean'
+            ? u.defaultFilterMyCardsOnLogin
+            : (m.defaultFilterMyCardsOnLogin ?? true),
+        allowViewAllTechniciansFilter:
+          typeof u.allowViewAllTechniciansFilter === 'boolean'
+            ? u.allowViewAllTechniciansFilter
+            : (m.allowViewAllTechniciansFilter ?? true),
+      };
+      updatedMember = next;
+      return next;
+    });
+    saveNeonStore();
+    if (updatedMember) {
+      await executeNeonSql(
+        `UPDATE team_members
+         SET name = $1, role_title = $2, github_handle = $3, specialty = $4, hourly_cost = $5, status = $6
+         WHERE id = $7`,
+        [
+          updatedMember.name,
+          updatedMember.roleTitle,
+          updatedMember.githubHandle,
+          updatedMember.specialty,
+          updatedMember.hourlyCost,
+          updatedMember.status,
+          memberId,
+        ]
+      );
+    }
+    res.json({ ok: true, item: updatedMember });
   });
 
   app.post('/api/neon/tickets', async (req, res) => {
@@ -1905,6 +2129,11 @@ async function startServer() {
     saveNeonStore();
     await executeNeonSql(`DELETE FROM reports WHERE id = $1`, [reportId]);
     res.json({ ok: true });
+  });
+
+  // Ensure any unmatched /api/* route always returns JSON and never falls through to Vite HTML
+  app.all('/api/*', (_req, res) => {
+    res.status(404).json({ ok: false, connected: false, error: 'Endpoint de API não encontrado.' });
   });
 
   if (process.env.NODE_ENV !== 'production') {
