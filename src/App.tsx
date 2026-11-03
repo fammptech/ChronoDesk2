@@ -2580,47 +2580,6 @@ function ChronoDeskWorkspace() {
 
         {activeNav === 'chamados' && (
           <div className="space-y-6">
-            {/* Active Ticket Cockpit */}
-            {activeTicket && (() => {
-              const cockpitPerm = checkCanStartTimerOnTicket(activeTicket);
-              return (
-                <ActiveTicketCockpit
-                  ticket={activeTicket}
-                  currentColumnName={
-                    boardCards.find((c) => c.issueNumber === activeTicket.issueNumber)
-                      ?.statusColumn ||
-                    (activeTicket.status === 'encerrado'
-                      ? 'Concluído'
-                      : activeTicket.status === 'em_atendimento'
-                      ? 'Em andamento'
-                      : 'Pronto para execução')
-                  }
-                  companies={companies}
-                  teamMembers={teamMembers}
-                  busyAction={busyAction}
-                  sessionNote={sessionNote}
-                  onChangeSessionNote={setSessionNote}
-                  onStartOrResume={handleStartOrResumeTicket}
-                  onPause={handlePauseTicket}
-                  onCloseTicket={handleCloseTicket}
-                  onReopenTicket={handleReopenTicket}
-                  onFetchGitHubComments={handleFetchGitHubComments}
-                  liveComments={liveComments}
-                  loadingComments={loadingComments}
-                  issueHistory={issueHistoryByNumber[activeTicket.issueNumber] || []}
-                  onConfirmCommentOrClose={async (params) => {
-                    await handleConfirmCommentOrCloseIssue(activeTicket.issueNumber, params);
-                  }}
-                  canStartTimer={cockpitPerm.allowed}
-                  startTimerBlockedReason={cockpitPerm.reason}
-                  onOpenCardDetail={() => {
-                    setViewMode('board');
-                    setOpenCardModalIssueNumber(activeTicket.issueNumber);
-                  }}
-                />
-              );
-            })()}
-
             {/* Quick Global Search & Technician Filter Bar */}
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex flex-wrap items-center gap-3">
